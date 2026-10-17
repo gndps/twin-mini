@@ -97,7 +97,7 @@ test('template text round-trips captions and the date', () => {
   const layers = [textLayer({ texts: ['a', 'b'], font: 'Pacifico', edge: 'top', shift: -6.5 })];
   const date = dateSettings({ source: 'now', color: 'stamp', fmt: { show: 'datetime', clock: '12', weekday: 'short' } });
   const text = exportTemplatesText([{ name: 'Retro', layers, date }]);
-  assert.match(text, /"twinmini": "caption-template"/);
+  assert.match(text, /"twinmini": "theme"/);
   const [back] = parseTemplatesText(text);
   assert.equal(back.name, 'Retro');
   assert.deepEqual(back.layers[0].texts, ['a', 'b']);
@@ -111,6 +111,17 @@ test('template text round-trips captions and the date', () => {
   const [old] = parseTemplatesText(v1);
   assert.equal(old.layers.length, 0);
   assert.equal(formatDate(D, old.date.fmt), "'26 10 07");
+});
+
+test('a theme carries its name and whole look; caption-only templates have none', () => {
+  const look = { format: 'one', layout: { two: { aspect: 'mini', w: 0.7, h: null, top: 0.1 }, one: { aspect: 'square', orientation: 'portrait', flip: false, w: null, h: null, top: null } }, color: 'cream', marks: false, paperId: 'custom', customPaper: { w: 120, h: 90 } };
+  const text = exportTemplatesText([{ name: 'Mini-tiddu', layers: [], date: dateSettings(), look }]);
+  const [back] = parseTemplatesText(text);
+  assert.equal(back.name, 'Mini-tiddu');
+  assert.deepEqual(back.look, look);
+  assert.equal(JSON.parse(text).version, 3);
+  const [v2] = parseTemplatesText('{"twinmini":"caption-template","version":2,"name":"Caps","captions":[]}');
+  assert.equal(v2.look, null);
 });
 
 test('import rejects junk with a readable message', () => {
