@@ -368,8 +368,19 @@
         <button class="done-btn" data-close>Done</button>
       </header>
       <div class="sheet-body">
-        <div class="card" id="paperList" role="radiogroup" aria-label="Paper"></div>
-        <p class="list-foot">Canon ink &amp; paper sets for the SELPHY CP1500.</p>
+        <h3 class="list-label">Size</h3>
+        <form class="card size-fields" id="paperSize">
+          <label>Width<input type="number" inputmode="decimal" step="0.1" min="40" max="420" id="paperW" aria-label="Paper width in mm"><span>mm</span></label>
+          <span class="times" aria-hidden="true">×</span>
+          <label>Height<input type="number" inputmode="decimal" step="0.1" min="40" max="420" id="paperH" aria-label="Paper height in mm"><span>mm</span></label>
+        </form>
+        <p class="list-foot" id="paperSizeNote">Pick a paper below, or type any size for a custom sheet.</p>
+
+        <h3 class="list-label">Canon SELPHY CP1500</h3>
+        <div class="card" id="paperList" role="radiogroup" aria-label="CP1500 paper"></div>
+
+        <h3 class="list-label">Other printer paper</h3>
+        <div class="card" id="otherPaperList" role="radiogroup" aria-label="Other paper sizes"></div>
       </div>
     </div>
   </dialog>
