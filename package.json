@@ -5,7 +5,7 @@
   "description": "Instax-style frame sheets for the Canon SELPHY CP1500 — fully client-side.",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test 'tests/*.test.js'",
     "dev": "python3 -m http.server 5173 --directory app"
   },
   "license": "MIT"
