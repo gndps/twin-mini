@@ -46,7 +46,7 @@ export function renderSheet(ctx, layout, slots, opts) {
       ctx.fillStyle = color.id === 'ink' ? '#2A2826' : '#EFEDE9';
       ctx.fillRect(win.x, win.y, win.w, win.h);
     }
-    if (slot.captions?.length) drawCaptions(ctx, card, slot.captions, color.ink);
+    if (slot.captions?.length) drawCaptions(ctx, card, slot.captions, color.ink, opts.hits && { list: opts.hits, card: i, skip: opts.skip });
   });
 
   if (marks && layout.cutX != null) drawCutHint(ctx, layout, scale);
@@ -88,7 +88,7 @@ const LINE = 1.22; // line height as a multiple of the font size
  * Along the edge they align to the photo window (start / centre / end), like hand-written
  * notes on real film. Side captions are rotated: the left reads upwards, the right downwards.
  */
-function drawCaptions(ctx, card, captions, autoInk) {
+function drawCaptions(ctx, card, captions, autoInk, hits) {
   const { win } = card;
   for (const edge of ['bottom', 'top', 'left', 'right']) {
     const lines = captions.filter((c) => c.edge === edge);
@@ -119,7 +119,23 @@ function drawCaptions(ctx, card, captions, autoInk) {
       ctx.textBaseline = 'middle';
       ctx.textAlign = l.align === 'start' ? 'left' : l.align === 'end' ? 'right' : 'center';
       const x = l.align === 'start' ? -length / 2 : l.align === 'end' ? length / 2 : 0;
-      ctx.fillText(fit(ctx, l.text, length), x, y + lh / 2 + dy);
+      const cy = y + lh / 2 + dy;
+      // Captions being edited in place (or still empty) are drawn by the overlay instead.
+      const skipped = hits?.skip && hits.skip.id === l.id && hits.skip.card === hits.card;
+      if (l.text && !skipped) ctx.fillText(fit(ctx, l.text, length), x, cy);
+      if (hits) {
+        // Where this line sits on the sheet (mm), so an editor can be laid exactly over it.
+        const m = ctx.getTransform();
+        const sc = Math.hypot(m.a, m.b);
+        const ox = m.e / sc, oy = m.f / sc; // sheet mm of local (0,0); scale is uniform
+        const ang = Math.atan2(m.b, m.a);
+        const cx = ox + Math.cos(ang) * 0 - Math.sin(ang) * cy;
+        const cyS = oy + Math.sin(ang) * 0 + Math.cos(ang) * cy;
+        hits.list.push({
+          card: hits.card, id: l.id, kind: l.kind, cx, cy: cyS, len: length, lh, rot: (ang * 180) / Math.PI,
+          align: l.align, size, font: fontCss(l.font), color: ctx.fillStyle,
+        });
+      }
       y += lh;
     }
     ctx.restore();

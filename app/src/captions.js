@@ -121,10 +121,11 @@ export const cloneDate = (d) => ({ ...d, fmt: { ...d.fmt } });
  * Concrete lines for one frame: its text captions, then the date if it is on.
  * @param {Date} photoDate the photo's timestamp; @param {Date} [now] used when the date source is "now"
  */
-export function resolveCaptions(layers, date, i, photoDate, now = new Date()) {
+export function resolveCaptions(layers, date, i, photoDate, now = new Date(), { keepEmpty = false } = {}) {
   const lines = layers.map((l) => ({ ...l, text: ((l.same ? l.text : l.texts?.[i]) || '').trim() }));
   if (date?.on) lines.push({ ...date, text: formatDate(date.source === 'now' ? now : photoDate, date.fmt) });
-  return lines.filter((l) => l.text);
+  // keepEmpty: the preview still lays out empty text captions so they can be tapped and typed into.
+  return lines.filter((l) => l.text || (keepEmpty && l.kind === 'text'));
 }
 
 function sanitizeStyle(l, base) {

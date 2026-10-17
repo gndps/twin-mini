@@ -88,10 +88,10 @@ const lay = () => state.layout[state.format];
 const currentLayout = () => computeLayout({ paperId: state.paperId, customPaper: state.customPaper, format: state.format, ...lay() });
 const count = () => (state.format === 'two' ? 2 : 1);
 const today = new Date();
-function renderSlots() {
+function renderSlots({ keepEmpty = false } = {}) {
   return Array.from({ length: count() }, (_, i) => ({
     photo: photos[i],
-    captions: resolveCaptions(state.layers, state.date, i, photos[i]?.date || today),
+    captions: resolveCaptions(state.layers, state.date, i, photos[i]?.date || today, new Date(), { keepEmpty }),
   }));
 }
 function photoDpi(photo, win) {
@@ -187,10 +187,63 @@ function drawPreview() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width = Math.round(rect.width * dpr);
   canvas.height = Math.round(rect.height * dpr);
-  renderSheet(canvas.getContext('2d'), layout, renderSlots(), {
+  const hits = [];
+  renderSheet(canvas.getContext('2d'), layout, renderSlots({ keepEmpty: true }), {
     scale: canvas.width / layout.paper.w, color: frameColor(), marks: state.marks, sourceFor: previewSource,
+    hits, skip: editingCaption,
   });
+  syncCaptionEditors(hits, layout, rect.width / layout.paper.w);
   drawThumbs();
+}
+
+/* ---------------- text captions: edit in place on the preview ---------------- */
+// Each text caption on the sheet gets a transparent input laid exactly over it: tap it and
+// type. While one is focused the canvas leaves that line out and the input shows the text.
+let editingCaption = null;
+const capLayer = $('#capLayer');
+function syncCaptionEditors(hits, layout, pxPerMm) {
+  const live = new Set();
+  for (const h of hits) {
+    if (h.kind !== 'text') continue;
+    const key = `${h.card}:${h.id}`;
+    live.add(key);
+    let inp = capLayer.querySelector(`[data-key="${key}"]`);
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'cap-edit';
+      inp.maxLength = 60;
+      inp.enterKeyHint = 'done';
+      inp.placeholder = 'Write a caption…';
+      inp.dataset.key = key;
+      inp.setAttribute('aria-label', count() === 2 ? `Caption on photo ${h.card + 1}` : 'Caption');
+      inp.addEventListener('focus', () => { editingCaption = { id: inp.dataset.id, card: Number(inp.dataset.card) }; drawPreview(); });
+      inp.addEventListener('blur', () => { editingCaption = null; drawPreview(); });
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+      inp.addEventListener('input', () => {
+        const l = layerById(inp.dataset.id);
+        if (!l) return;
+        if (l.same) l.text = inp.value; else l.texts[Number(inp.dataset.card)] = inp.value;
+        captionsChanged({ rebuildList: true });
+      });
+      capLayer.append(inp);
+    }
+    inp.dataset.id = h.id;
+    inp.dataset.card = h.card;
+    const l = layerById(h.id);
+    const value = l ? (l.same ? l.text : l.texts[h.card]) || '' : '';
+    if (document.activeElement !== inp) inp.value = value;
+    // 16 px text (so iOS doesn't zoom on focus), scaled down to the caption's real size.
+    const k = (h.size * pxPerMm) / 16;
+    Object.assign(inp.style, {
+      left: `${(h.cx / layout.paper.w) * 100}%`, top: `${(h.cy / layout.paper.h) * 100}%`,
+      width: `${(h.len * pxPerMm) / k}px`, height: `${(h.lh * pxPerMm) / k}px`,
+      transform: `translate(-50%, -50%) rotate(${h.rot}deg) scale(${k})`,
+      fontFamily: h.font, textAlign: h.align === 'start' ? 'left' : h.align === 'end' ? 'right' : 'center',
+    });
+    inp.style.setProperty('--cap-ink', h.color);
+  }
+  for (const inp of [...capLayer.children]) if (!live.has(inp.dataset.key) && document.activeElement !== inp) inp.remove();
 }
 
 const ICONS = {
