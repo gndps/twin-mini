@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Twin Mini — instant frames for SELPHY</title>
   <meta name="description" content="Turn one or two photos into an Instax-style framed print sheet for the Canon SELPHY CP1500. Runs entirely in your browser at full resolution.">
-  <meta name="theme-color" content="#F5F3EF">
+  <meta name="theme-color" content="#FFFFFF">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Twin Mini">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Caveat&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -36,10 +36,9 @@
       <div class="sheet-wrap" id="sheetWrap">
         <div class="sheet" id="sheet">
           <canvas id="preview" aria-hidden="true"></canvas>
-          <div class="safe-area" id="safeArea" hidden></div>
           <div class="slots" id="slots"></div>
         </div>
-        <div class="drop-veil" id="dropVeil"><span>Drop photos to place them</span></div>
+        <div class="drop-veil"><span>Drop photos to place them</span></div>
       </div>
       <p class="stage-meta" id="sheetMeta"></p>
     </section>
@@ -53,24 +52,43 @@
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>Swap
             </button>
           </div>
-          <div class="photo-list" id="photoList"></div>
+          <div class="card" id="photoList"></div>
         </section>
 
         <section class="group">
           <h2 class="group-title">Frame</h2>
-          <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
+          <div class="card">
+            <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
+            <label class="list-row">
+              <span>Cut guide<small>A faint hint at the top and bottom of the centre line</small></span>
+              <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+            </label>
+          </div>
         </section>
 
         <section class="group">
-          <h2 class="group-title">Caption</h2>
-          <div class="captions" id="captions"></div>
+          <div class="group-head">
+            <h2 class="group-title">Captions</h2>
+            <button class="text-btn" data-open="templatesDlg">Templates</button>
+          </div>
+          <div class="chips" id="templateChips" role="list" aria-label="Caption templates"></div>
+          <div class="card" id="layerList"></div>
+          <div class="add-pair">
+            <button class="text-btn" id="addText"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Text</button>
+            <button class="text-btn" id="addDate"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Date</button>
+          </div>
         </section>
 
-        <button class="row-link" data-open="advanced">
-          <span class="row-link-icon"><svg viewBox="0 0 20 20"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></svg></span>
-          <span class="row-link-text">Advanced<small id="advSummary"></small></span>
-          <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
-        </button>
+        <section class="group">
+          <h2 class="group-title">Advanced</h2>
+          <div class="card">
+            <button class="list-row nav" data-open="paperDlg">
+              <span>Paper</span>
+              <span class="row-value" id="paperValue">RP-108</span>
+              <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+            </button>
+          </div>
+        </section>
       </div>
 
       <div class="inspector-foot">
@@ -81,99 +99,119 @@
 
   <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple hidden>
 
-  <!-- Advanced settings -->
-  <dialog class="sheet-modal" id="advanced" aria-labelledby="advTitle">
+  <!-- Caption style -->
+  <dialog class="sheet-modal" id="layerDlg" aria-labelledby="layerTitle">
+    <div class="sheet-inner">
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <button class="done-btn ghost danger" id="layerDelete">Delete</button>
+        <h2 id="layerTitle">Caption</h2>
+        <button class="done-btn" data-close>Done</button>
+      </header>
+      <div class="sheet-body" id="layerBody">
+        <div class="card" id="layerTextBlock">
+          <label class="list-row">
+            <span>Same text on both photos</span>
+            <span class="switch"><input type="checkbox" id="layerSame"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+          </label>
+          <div class="text-fields" id="layerTexts"></div>
+        </div>
+        <div id="layerDateBlock">
+          <h3 class="list-label">Date format</h3>
+          <div class="chips wrap" id="dateFormats"></div>
+          <p class="list-foot">Taken from each photo’s capture date, or the file date.</p>
+        </div>
+
+        <h3 class="list-label">Style</h3>
+        <div class="card">
+          <button class="list-row nav" id="layerFontBtn">
+            <span>Font</span><span class="row-value" id="layerFontName">Caveat</span>
+            <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+          </button>
+          <div class="list-row stacked">
+            <span class="row-split"><span>Size</span><span class="row-value" id="layerSizeVal"></span></span>
+            <input type="range" id="layerSize" min="2" max="12" step="0.1" aria-label="Text size">
+          </div>
+          <div class="list-row stacked">
+            <span>Colour</span>
+            <div class="mini-swatches" id="layerColors" role="radiogroup" aria-label="Text colour"></div>
+          </div>
+        </div>
+
+        <h3 class="list-label">Position</h3>
+        <div class="card">
+          <div class="list-row stacked">
+            <span>Edge</span>
+            <div class="seg" role="radiogroup" id="layerEdge">
+              <button role="radio" data-value="bottom">Bottom</button>
+              <button role="radio" data-value="top">Top</button>
+              <button role="radio" data-value="left">Left</button>
+              <button role="radio" data-value="right">Right</button>
+            </div>
+          </div>
+          <div class="list-row stacked">
+            <span>Alignment</span>
+            <div class="seg" role="radiogroup" id="layerAlign">
+              <button role="radio" data-value="start" aria-label="Start"><svg viewBox="0 0 20 20"><path d="M3 5h14M3 9h9M3 13h12M3 17h7"/></svg></button>
+              <button role="radio" data-value="center" aria-label="Centre"><svg viewBox="0 0 20 20"><path d="M3 5h14M5.5 9h9M4 13h12M6.5 17h7"/></svg></button>
+              <button role="radio" data-value="end" aria-label="End"><svg viewBox="0 0 20 20"><path d="M3 5h14M8 9h9M5 13h12M10 17h7"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Font picker -->
+  <dialog class="sheet-modal" id="fontDlg" aria-labelledby="fontTitle">
     <div class="sheet-inner">
       <header class="sheet-head">
         <span class="grabber" aria-hidden="true"></span>
         <span></span>
-        <h2 id="advTitle">Advanced</h2>
+        <h2 id="fontTitle">Font</h2>
+        <button class="done-btn" data-close>Done</button>
+      </header>
+      <div class="chips tabs" id="fontGroups" role="tablist"></div>
+      <div class="sheet-body">
+        <div class="card" id="fontList" role="radiogroup" aria-label="Fonts"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Templates -->
+  <dialog class="sheet-modal" id="templatesDlg" aria-labelledby="tplTitle">
+    <div class="sheet-inner">
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <span></span>
+        <h2 id="tplTitle">Templates</h2>
         <button class="done-btn" data-close>Done</button>
       </header>
       <div class="sheet-body">
-        <h3 class="list-label">Layout</h3>
-        <div class="list">
-          <div class="list-row stacked">
-            <span>Format</span>
-            <div class="seg" role="radiogroup" id="layoutSeg">
-              <button role="radio" data-value="mini">Two Minis</button>
-              <button role="radio" data-value="wide">One Wide</button>
-            </div>
-          </div>
-          <div class="list-row stacked">
-            <span>Frame size</span>
-            <div class="option-list" role="radiogroup" id="frameList"></div>
-            <div class="custom-fields" id="customFields" hidden>
-              <label>Photo width<input type="number" inputmode="decimal" step="0.5" min="20" max="140" data-custom="winW"><span>mm</span></label>
-              <label>Top<input type="number" inputmode="decimal" step="0.5" min="0" max="40" data-custom="top"><span>mm</span></label>
-              <label>Sides<input type="number" inputmode="decimal" step="0.5" min="0" max="40" data-custom="side"><span>mm</span></label>
-              <label>Chin<input type="number" inputmode="decimal" step="0.5" min="0" max="60" data-custom="chin"><span>mm</span></label>
-            </div>
-            <p class="note warn" id="fitWarn" hidden></p>
-          </div>
-        </div>
+        <h3 class="list-label">Save current captions</h3>
+        <form class="card save-row" id="tplForm">
+          <input type="text" id="tplName" placeholder="Template name" maxlength="30" enterkeyhint="done" required>
+          <button class="done-btn" type="submit">Save</button>
+        </form>
+        <h3 class="list-label">Your templates</h3>
+        <div class="card" id="tplList"></div>
+        <p class="list-foot">Saved on this device. They stay until you delete them.</p>
+      </div>
+    </div>
+  </dialog>
 
-        <h3 class="list-label">Caption</h3>
-        <div class="list">
-          <div class="list-row stacked">
-            <span>Font</span>
-            <div class="seg" role="radiogroup" id="fontSeg">
-              <button role="radio" data-value="hand" class="f-hand">Handwritten</button>
-              <button role="radio" data-value="serif" class="f-serif">Serif</button>
-              <button role="radio" data-value="sans" class="f-sans">Sans</button>
-            </div>
-          </div>
-        </div>
-
-        <h3 class="list-label">Paper &amp; guides</h3>
-        <div class="list">
-          <div class="list-row stacked">
-            <span>Paper</span>
-            <div class="seg" role="radiogroup" id="paperSeg">
-              <button role="radio" data-value="postcard">Postcard 148×100</button>
-              <button role="radio" data-value="4x6">4×6 in</button>
-            </div>
-          </div>
-          <label class="list-row">
-            <span>Cut guides<small>Hairline centre line and corner ticks</small></span>
-            <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
-          </label>
-          <label class="list-row">
-            <span>Show safe area<small>Preview only: what borderless may trim</small></span>
-            <span class="switch"><input type="checkbox" id="safeToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
-          </label>
-          <label class="list-row" id="repeatRow">
-            <span>Repeat a single photo<small>Fill both frames with one photo</small></span>
-            <span class="switch"><input type="checkbox" id="repeatToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
-          </label>
-        </div>
-
-        <h3 class="list-label">Export</h3>
-        <div class="list">
-          <div class="list-row stacked">
-            <span>Resolution</span>
-            <div class="seg" role="radiogroup" id="dpiSeg">
-              <button role="radio" data-value="auto">Auto</button>
-              <button role="radio" data-value="300">300</button>
-              <button role="radio" data-value="600">600</button>
-              <button role="radio" data-value="1200">1200</button>
-            </div>
-          </div>
-          <div class="list-row stacked">
-            <span>File type</span>
-            <div class="seg" role="radiogroup" id="formatSeg">
-              <button role="radio" data-value="png">PNG</button>
-              <button role="radio" data-value="jpeg">JPEG</button>
-            </div>
-          </div>
-        </div>
-        <p class="list-foot" id="outInfo"></p>
-
-        <h3 class="list-label">Help</h3>
-        <div class="list">
-          <button class="list-row nav" data-open="tips"><span>Printing tips for SELPHY</span><svg class="chev" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></svg></button>
-          <button class="list-row nav danger" id="resetBtn"><span>Reset to defaults</span></button>
-        </div>
+  <!-- Paper -->
+  <dialog class="sheet-modal" id="paperDlg" aria-labelledby="paperTitle">
+    <div class="sheet-inner">
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <span></span>
+        <h2 id="paperTitle">Paper</h2>
+        <button class="done-btn" data-close>Done</button>
+      </header>
+      <div class="sheet-body">
+        <div class="card" id="paperList" role="radiogroup" aria-label="Paper"></div>
+        <p class="list-foot">Canon ink &amp; paper sets for the SELPHY CP1500.</p>
       </div>
     </div>
   </dialog>
@@ -221,12 +259,8 @@
           <p class="export-meta" id="exportStats"></p>
           <div class="export-actions">
             <button class="btn-primary" id="shareBtn" hidden>Share to SELPHY app</button>
-            <a class="btn-primary" id="downloadLink" download aria-disabled="true">Download</a>
+            <a class="btn-primary" id="downloadLink" download aria-disabled="true">Save JPEG</a>
           </div>
-          <ol class="steps">
-            <li>Print on Postcard paper, borderless.</li>
-            <li>Cut along the centre line.</li>
-          </ol>
         </div>
       </div>
     </div>
@@ -242,30 +276,11 @@
         <button class="done-btn" data-close>Done</button>
       </header>
       <ol class="how">
-        <li><span class="how-n">1</span><div><b>Add one or two photos.</b> Each is cropped to the Instax window (46 : 62) from its full original resolution, never stretched. Phone orientation is respected; rotate any photo in 90° steps.</div></li>
-        <li><span class="how-n">2</span><div><b>Pick a frame colour</b> and, if you like, write a caption on the chin. Everything else lives in Advanced.</div></li>
-        <li><span class="how-n">3</span><div><b>Print and cut.</b> Print borderless on a SELPHY postcard and cut down the middle: two Instax-style prints.</div></li>
+        <li><span class="how-n">1</span><div><b>Add one or two photos.</b> Each is cropped to the Instax window (46 : 62) from its original pixels, never stretched. Turn or flip any photo.</div></li>
+        <li><span class="how-n">2</span><div><b>Choose a frame colour and captions.</b> The photo’s date is added by default; save your favourite caption styles as templates.</div></li>
+        <li><span class="how-n">3</span><div><b>Print and cut.</b> Print the JPEG from the SELPHY app, then cut down the middle for two Instax-style prints.</div></li>
       </ol>
-      <p class="note">Nothing is uploaded. Your photos never leave this device.</p>
-    </div>
-  </dialog>
-
-  <!-- Print tips -->
-  <dialog class="modal modal-info" id="tips" aria-labelledby="tipsTitle">
-    <div class="modal-inner">
-      <header class="sheet-head">
-        <span class="grabber" aria-hidden="true"></span>
-        <span></span>
-        <h2 id="tipsTitle">Printing tips</h2>
-        <button class="done-btn" data-close>Done</button>
-      </header>
-      <ul class="tips">
-        <li><b>Paper.</b> Postcard size (KP-108IN, 100 × 148 mm). The file is laid out at exactly that size.</li>
-        <li><b>Borderless.</b> The printer trims about 2 mm from every edge. Half sheet already places the photo inside that, so borders come out even.</li>
-        <li><b>No auto-correction.</b> Turn off “Image optimize” and red-eye correction in the SELPHY app so frame colours stay true.</li>
-        <li><b>Resolution.</b> The CP1500 prints at 300 dpi. Auto keeps every pixel of your sharpest photo (up to 1200 dpi) so the printer does a single, final resample.</li>
-        <li><b>From a computer.</b> Print at actual size on Postcard paper, borderless.</li>
-      </ul>
+      <p class="note">Nothing is uploaded. Photos stay on this device; settings and templates are saved in this browser.</p>
     </div>
   </dialog>
 
