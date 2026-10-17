@@ -1,4 +1,4 @@
-import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
+import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, CUSTOM_RATIO, aspectOf, windowRatio, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
 import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
 import { setJpegDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
@@ -21,10 +21,13 @@ const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.use
 const MAX_PIXELS = isSafari ? 16_777_216 : 120_000_000;
 const touchFirst = matchMedia('(hover: none)').matches;
 
-const defaultLayout = () => ({
-  two: { aspect: FORMATS.two.aspect, size: null, offset: null },
-  one: { aspect: FORMATS.one.aspect, size: null, offset: null, orientation: 'landscape' },
+const presetRatio = (id) => { const a = aspectOf(id); return a ? a.w / a.h : 1; };
+// Each format keeps its own shape, size and position, saved independently.
+const defaultLayoutFor = (f) => ({
+  aspect: FORMATS[f].aspect, ratio: presetRatio(FORMATS[f].aspect), size: null, offset: null,
+  ...(f === 'one' ? { orientation: 'landscape', flip: true } : {}),
 });
+const defaultLayout = () => ({ two: defaultLayoutFor('two'), one: defaultLayoutFor('one') });
 const defaults = () => ({
   format: 'two', layout: defaultLayout(),
   color: 'white', marks: true, paperId: DEFAULT_PAPER, layers: defaultLayers(), templateId: BUILTIN_TEMPLATES[0].id,
@@ -61,7 +64,9 @@ function loadState() {
   for (const f of ['two', 'one']) {
     const L = saved.layout?.[f];
     if (!L) continue;
-    if (ASPECTS.some((a) => a.id === L.aspect)) s.layout[f].aspect = L.aspect;
+    if (L.aspect === 'custom' || aspectOf(L.aspect)) s.layout[f].aspect = L.aspect;
+    if (Number.isFinite(L.ratio)) s.layout[f].ratio = clamp(L.ratio, CUSTOM_RATIO.min, CUSTOM_RATIO.max);
+    if (f === 'one' && typeof L.flip === 'boolean') s.layout.one.flip = L.flip;
     if (Number.isFinite(L.size)) s.layout[f].size = clamp(L.size, 0.3, 1);
     if (Number.isFinite(L.offset)) s.layout[f].offset = clamp(L.offset, -1, 1);
     if (f === 'one' && (L.orientation === 'portrait' || L.orientation === 'landscape')) s.layout.one.orientation = L.orientation;
@@ -819,45 +824,82 @@ $('#orientSeg').addEventListener('click', (e) => {
   state.layout.one.size = null; // sizes differ between orientations; start from the default
   update();
 });
+const fmtRatio = (r) => (r < 1 ? `1 : ${(1 / r).toFixed(2)}` : `${r.toFixed(2)} : 1`);
+// Ratio slider is logarithmic so tall and wide shapes get equal travel.
+const LOG_SPAN = Math.log(CUSTOM_RATIO.max / CUSTOM_RATIO.min);
+const ratioToT = (r) => Math.log(r / CUSTOM_RATIO.min) / LOG_SPAN;
+const tToRatio = (t) => CUSTOM_RATIO.min * Math.exp(t * LOG_SPAN);
+const flipActive = () => state.format === 'one' && state.layout.one.orientation === 'landscape' && state.layout.one.flip !== false;
+
 function layoutSummary() {
   const L = lay();
-  const custom = L.size != null || L.offset != null;
-  return `${aspectOf(L.aspect).label}${custom ? ' · custom' : ''}`;
+  const name = L.aspect === 'custom' ? `Custom ${fmtRatio(windowRatio({ format: state.format, ...L }))}` : aspectOf(L.aspect)?.label;
+  return `${name}${flipActive() ? ' · rotated' : ''}${L.size != null || L.offset != null ? ' · custom fit' : ''}`;
 }
+function baseRatio(L) { return L.aspect === 'custom' ? L.ratio : presetRatio(L.aspect); }
 function buildLayoutSheet() {
   const L = lay();
-  const geo = currentLayout();
+  const flipped = flipActive();
   $('#aspectList').replaceChildren(...ASPECTS.map((a) => {
     const b = document.createElement('button');
-    b.className = 'aspect-row';
+    b.className = 'aspect-tile';
     b.setAttribute('role', 'radio');
     b.setAttribute('aria-checked', String(L.aspect === a.id));
-    let w = a.w, h = a.h;
-    if (state.format === 'one') { const lw = Math.max(w, h), sh = Math.min(w, h); [w, h] = state.layout.one.orientation === 'portrait' ? [sh, lw] : [lw, sh]; }
+    const [w, h] = flipped ? [a.h, a.w] : [a.w, a.h];
     const k = 30 / Math.max(w, h);
-    b.innerHTML = `<span class="shape"><i style="width:${w * k}px;height:${h * k}px"></i></span>
-      <span class="t"><b>${a.label}</b><small>${a.cameras}</small></span><span class="check">${icon('check')}</span>`;
-    b.addEventListener('click', () => { L.aspect = a.id; L.offset = null; update(); });
+    const label = flipped && a.label.includes(':') ? a.label.split(' : ').reverse().join(' : ') : a.label;
+    b.innerHTML = `<span class="shape"><i style="width:${w * k}px;height:${h * k}px"></i></span><b>${label}</b><small>${a.cameras}</small>`;
+    b.addEventListener('click', () => { L.aspect = a.id; L.ratio = a.w / a.h; L.offset = null; update(); });
     return b;
   }));
-  $('#sizeRange').value = geo.size;
-  $('#sizeVal').textContent = `${Math.round(geo.size * 100)}% · ${geo.cards[0].win.w.toFixed(0)} × ${geo.cards[0].win.h.toFixed(0)} mm`;
-  $('#offsetRange').value = geo.offset;
-  const o = geo.offset;
-  $('#offsetVal').textContent = Math.abs(o) < 0.02 ? 'Centre' : `${Math.round(Math.abs(o) * 100)}% ${o < 0 ? 'up' : 'down'}`;
+  $('#ratioRange').value = ratioToT(baseRatio(L));
+  $('#ratioVal').textContent = L.aspect === 'custom' ? `Custom · ${fmtRatio(windowRatio({ format: state.format, ...L }))}` : fmtRatio(windowRatio({ format: state.format, ...L }));
+  $('#flipRow').hidden = !(state.format === 'one' && L.orientation === 'landscape');
+  $('#flipToggle').checked = L.flip !== false;
   $('#layoutFoot').textContent = state.format === 'two'
     ? 'Always centred left to right, so the sheet is still cut straight down the middle.'
     : 'Always centred left to right on the sheet.';
+  fitLabels();
+  drawLayoutPreview();
 }
+function fitLabels() {
+  const geo = currentLayout();
+  const win = geo.cards[0].win;
+  $('#sizeRange').value = geo.size;
+  $('#sizeVal').textContent = `${Math.round(geo.size * 100)}% · ${win.w.toFixed(0)} × ${win.h.toFixed(0)} mm`;
+  $('#offsetRange').value = geo.offset;
+  const o = geo.offset;
+  $('#offsetVal').textContent = Math.abs(o) < 0.02 ? 'Centre' : `${Math.round(Math.abs(o) * 100)}% ${o < 0 ? 'up' : 'down'}`;
+}
+/** One frame, large, inside the sheet: the photo being sized (or the first one added). */
+function drawLayoutPreview() {
+  const cv = $('#layoutCanvas');
+  if (!$('#layoutDlg').open) return;
+  const layout = currentLayout();
+  const slots = renderSlots();
+  const i = Math.max(0, slots.findIndex((x) => x.photo));
+  const card = layout.cards[i];
+  const box = cv.parentElement.getBoundingClientRect();
+  const maxH = Math.min(window.innerHeight * (window.innerWidth <= 860 ? 0.3 : 0.38), 320);
+  const k = Math.min((box.width - 32) / card.w, maxH / card.h);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  cv.style.width = `${card.w * k}px`;
+  cv.style.height = `${card.h * k}px`;
+  cv.width = Math.round(card.w * k * dpr);
+  cv.height = Math.round(card.h * k * dpr);
+  renderSheet(cv.getContext('2d'), { ...layout, cards: [card] }, [slots[i]], {
+    scale: k * dpr, origin: { x: card.x, y: card.y }, color: frameColor(), marks: false, sourceFor: previewSource,
+  });
+}
+$('[data-open="layoutDlg"]').addEventListener('click', () => requestAnimationFrame(buildLayoutSheet));
 /** Slider drags only redraw; the full rebuild happens when the drag ends. */
 function layoutLive() {
   saveState();
   buildSlots();
   drawPreview();
-  const geo = currentLayout();
-  $('#sizeVal').textContent = `${Math.round(geo.size * 100)}% · ${geo.cards[0].win.w.toFixed(0)} × ${geo.cards[0].win.h.toFixed(0)} mm`;
-  const o = geo.offset;
-  $('#offsetVal').textContent = Math.abs(o) < 0.02 ? 'Centre' : `${Math.round(Math.abs(o) * 100)}% ${o < 0 ? 'up' : 'down'}`;
+  fitLabels();
+  drawLayoutPreview();
+  $('#layoutValue').textContent = layoutSummary();
 }
 $('#sizeRange').addEventListener('input', (e) => {
   const L = lay();
@@ -871,12 +913,23 @@ $('#offsetRange').addEventListener('input', (e) => {
   lay().offset = v;
   layoutLive();
 });
-for (const id of ['#sizeRange', '#offsetRange']) $(id).addEventListener('change', update);
-$('#layoutReset').addEventListener('click', () => {
+$('#ratioRange').addEventListener('input', (e) => {
   const L = lay();
-  L.aspect = FORMATS[state.format].aspect; L.size = null; L.offset = null;
+  if (L.offset == null) L.offset = currentLayout().offset;
+  L.aspect = 'custom';
+  L.ratio = tToRatio(Number(e.target.value));
+  $$('#aspectList .aspect-tile').forEach((t) => t.setAttribute('aria-checked', 'false'));
+  $('#ratioVal').textContent = `Custom · ${fmtRatio(windowRatio({ format: state.format, ...L }))}`;
+  layoutLive();
+});
+for (const id of ['#sizeRange', '#offsetRange', '#ratioRange']) $(id).addEventListener('change', update);
+$('#flipToggle').addEventListener('change', (e) => { lay().flip = e.target.checked; lay().offset = null; update(); });
+$('#layoutReset').addEventListener('click', () => {
+  const keepOrientation = lay().orientation;
+  state.layout[state.format] = { ...defaultLayoutFor(state.format), ...(keepOrientation ? { orientation: keepOrientation } : {}) };
   update();
 });
+window.addEventListener('resize', drawLayoutPreview);
 
 /* ---------------- paper ---------------- */
 function buildPaperList() {

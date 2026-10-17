@@ -22,22 +22,35 @@ export const PAPERS = {
 };
 export const DEFAULT_PAPER = 'RP-108';
 
-// Photo window shapes, from the image areas of instant-camera film (W × H mm).
-// Polaroid Go (47 × 46) is close enough to square to share that preset; Polaroid Spectra
-// is left out (film discontinued in 2019).
+// Photo window shapes (W × H, portrait or square; One Wide can rotate them). Instant-camera
+// film first (image areas in mm), then common photo ratios. Polaroid i-Type / 600 / Go are
+// square; 2 × 3 ZINK (Kodak Printomatic / Smile, Polaroid Snap) is the same shape as 35 mm.
 export const ASPECTS = [
-  { id: 'mini', label: 'Instax Mini', cameras: 'Instax Mini 12 / 41 / 99, Mini Evo, Leica Sofort', w: 46, h: 62 },
-  { id: 'square', label: 'Square', cameras: 'Instax Square, Polaroid i-Type / 600 / SX-70, Polaroid Go', w: 62, h: 62 },
-  { id: 'wide', label: 'Instax Wide', cameras: 'Instax Wide 300 / 400, Wide Evo', w: 99, h: 62 },
-  { id: 'zink', label: '2 × 3 ZINK', cameras: 'Kodak Printomatic, Kodak Smile, Polaroid Snap', w: 50.8, h: 76.2 },
+  { id: 'mini', label: 'Instax Mini', cameras: 'Instax Mini, Leica Sofort', w: 46, h: 62 },
+  { id: 'square', label: 'Square', cameras: 'Instax Square, Polaroid', w: 1, h: 1 },
+  { id: '4x5', label: '4 : 5', cameras: 'Instagram portrait', w: 4, h: 5 },
+  { id: '3x4', label: '3 : 4', cameras: 'Phone camera', w: 3, h: 4 },
+  { id: '2x3', label: '2 : 3', cameras: '35 mm, ZINK', w: 2, h: 3 },
+  { id: '5x7', label: '5 : 7', cameras: 'Photo print', w: 5, h: 7 },
+  { id: '9x16', label: '9 : 16', cameras: 'Phone screen', w: 9, h: 16 },
 ];
-export const aspectOf = (id) => ASPECTS.find((a) => a.id === id) || ASPECTS[0];
+export const CUSTOM_RATIO = { min: 0.4, max: 2.5 };
+export const aspectOf = (id) => ASPECTS.find((a) => a.id === id) || null;
 
 export const FORMATS = {
   two: { label: 'Two Minis', aspect: 'mini', size: 56 / 74 },       // half sheet: 9 mm borders on a postcard half
-  one: { label: 'One Wide', aspect: 'wide', size: 0.82 },
+  one: { label: 'One Wide', aspect: '2x3', size: 0.82 },
 };
 const PORTRAIT_ONE_SIZE = 0.75;
+
+/** Width ÷ height of the photo window for a layout's shape settings. */
+export function windowRatio({ format = 'two', orientation = 'landscape', aspect, ratio, flip } = {}) {
+  const preset = aspect === 'custom' ? null : aspectOf(aspect || FORMATS[format].aspect) || aspectOf(FORMATS[format].aspect);
+  let a = preset ? preset.w / preset.h : clamp(Number(ratio) || 1, CUSTOM_RATIO.min, CUSTOM_RATIO.max);
+  // Landscape One Wide shows the shape turned on its side unless the user rotates it back.
+  if (format === 'one' && orientation === 'landscape' && (flip ?? true)) a = 1 / a;
+  return a;
+}
 
 const r = (n) => Math.round(n * 1000) / 1000;
 
@@ -55,16 +68,14 @@ export function defaultSize(format, orientation) {
  *   the rest of the height becomes the chin.
  * - one + portrait: the sheet is used upright (the SELPHY app rotates it onto the paper).
  */
-export function computeLayout({ paperId = DEFAULT_PAPER, format = 'two', orientation = 'landscape', aspect, size, offset = null } = {}) {
+export function computeLayout({ paperId = DEFAULT_PAPER, format = 'two', orientation = 'landscape', aspect, ratio, flip, size, offset = null } = {}) {
   const base = PAPERS[paperId] || PAPERS[DEFAULT_PAPER];
   const portrait = format === 'one' && orientation === 'portrait';
   const paper = { ...base, w: portrait ? base.h : base.w, h: portrait ? base.w : base.h, portrait };
   const count = format === 'one' ? 1 : 2;
   const W = paper.w / count, H = paper.h;
 
-  const shape = aspectOf(aspect || FORMATS[format].aspect);
-  let a = shape.w / shape.h;
-  if (format === 'one') a = orientation === 'portrait' ? Math.min(a, 1 / a) : Math.max(a, 1 / a);
+  const a = windowRatio({ format, orientation, aspect, ratio, flip });
   const s = clamp(size ?? defaultSize(format, orientation), 0.2, 1);
   const maxW = Math.min(W, H * a);
   const winW = maxW * s, winH = winW / a;
@@ -84,7 +95,7 @@ export function computeLayout({ paperId = DEFAULT_PAPER, format = 'two', orienta
       right: { x: r(x + W - side), y: 0, w: r(side), h: r(H) },
     };
   });
-  return { paper, cutX: count === 2 ? W : null, cards, aspect: shape, size: s, offset: free > 0 ? (top / (free / 2)) - 1 : 0 };
+  return { paper, cutX: count === 2 ? W : null, cards, ratio: a, size: s, offset: free > 0 ? (top / (free / 2)) - 1 : 0 };
 }
 
 export const mmToPx = (mm, dpi) => (mm / MM_PER_INCH) * dpi;
