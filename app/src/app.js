@@ -1,10 +1,10 @@
-import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
+import { computeLayout, PAPERS, OTHER_PAPERS, CUSTOM_PAPER, resolvePaper, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
 import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
 import { setPngDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
 import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
 import {
-  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_OPTIONS, TIME_SOURCES, formatDate, effectiveShift,
+  CAPTION_COLORS, DATE_OPTIONS, TIME_SOURCES, formatDate, effectiveShift,
   cloneLayers, cloneDate, dateSettings, defaultCaptions, defaultDate, migrateDate,
   resolveCaptions, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
 } from './captions.js';
@@ -29,7 +29,7 @@ const defaultLayoutFor = (f) => ({
 const defaultLayout = () => ({ two: defaultLayoutFor('two'), one: defaultLayoutFor('one') });
 const defaults = () => ({
   format: 'two', layout: defaultLayout(),
-  color: 'white', marks: true, paperId: DEFAULT_PAPER, templateId: BUILTIN_TEMPLATES[0].id,
+  color: 'white', marks: true, paperId: DEFAULT_PAPER, customPaper: { w: 148, h: 100 }, templateId: null,
   layers: defaultCaptions(), // text captions
   date: defaultDate(),       // the one date per print
 });
@@ -56,7 +56,8 @@ function loadState() {
   if (!saved) return s;
   if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
   if (typeof saved.marks === 'boolean') s.marks = saved.marks;
-  if (PAPERS[saved.paperId]) s.paperId = saved.paperId;
+  if (PAPERS[saved.paperId] || OTHER_PAPERS[saved.paperId] || saved.paperId === 'custom') s.paperId = saved.paperId;
+  if (Number.isFinite(saved.customPaper?.w) && Number.isFinite(saved.customPaper?.h)) s.customPaper = { w: saved.customPaper.w, h: saved.customPaper.h };
   // Every session opens on Two Minis; any custom size/position is kept.
   for (const f of ['two', 'one']) {
     const L = saved.layout?.[f];
@@ -84,7 +85,7 @@ const saveTemplates = () => writeJson(TEMPLATES_KEY, templates);
 /* ---------------- derived ---------------- */
 const frameColor = () => FRAME_COLORS.find((c) => c.id === state.color) || FRAME_COLORS[0];
 const lay = () => state.layout[state.format];
-const currentLayout = () => computeLayout({ paperId: state.paperId, format: state.format, ...lay() });
+const currentLayout = () => computeLayout({ paperId: state.paperId, customPaper: state.customPaper, format: state.format, ...lay() });
 const count = () => (state.format === 'two' ? 2 : 1);
 const today = new Date();
 function renderSlots() {
@@ -490,7 +491,6 @@ $('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.che
 /* ---------------- captions: templates ---------------- */
 function allTemplates() {
   return [
-    ...BUILTIN_TEMPLATES.map((t) => ({ id: t.id, name: t.name, layers: t.captions, date: t.date })),
     ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, layers: () => t.layers, date: () => t.date })),
     ...templates.map((t) => ({ ...t, layers: () => t.layers, date: () => t.date })),
   ];
@@ -965,18 +965,43 @@ $('#layoutReset').addEventListener('click', () => {
 window.addEventListener('resize', drawLayoutPreview);
 
 /* ---------------- paper ---------------- */
-function buildPaperList() {
-  $('#paperValue').textContent = state.paperId;
-  $('#paperList').replaceChildren(...Object.values(PAPERS).map((p) => {
-    const b = document.createElement('button');
-    b.className = 'paper-row';
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-checked', String(state.paperId === p.id));
-    b.innerHTML = `<span><b>${p.id}</b><small>${p.kind} · ${p.note}</small></span><span class="check">${icon('check')}</span>`;
-    b.addEventListener('click', () => { state.paperId = p.id; update(); });
-    return b;
-  }));
+const fmtMm = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+const paperName = (p) => (p.id === 'custom' ? `Custom ${fmtMm(p.w)} × ${fmtMm(p.h)} mm` : PAPERS[p.id] ? p.id : p.kind);
+function paperRow(p) {
+  const b = document.createElement('button');
+  b.className = 'paper-row';
+  b.setAttribute('role', 'radio');
+  b.setAttribute('aria-checked', String(state.paperId === p.id));
+  const title = PAPERS[p.id] ? p.id : p.kind;
+  const sub = PAPERS[p.id] ? `${p.kind} · ${p.note}` : p.note;
+  b.innerHTML = `<span><b>${title}</b><small>${sub}</small></span><span class="dims">${fmtMm(p.w)} × ${fmtMm(p.h)}</span><span class="check">${icon('check')}</span>`;
+  // Picking a paper loads its size into the fields, so it can be tweaked into a custom size.
+  b.addEventListener('click', () => { state.paperId = p.id; state.customPaper = { w: p.w, h: p.h }; update(); });
+  return b;
 }
+function buildPaperList() {
+  const paper = resolvePaper(state.paperId, state.customPaper);
+  $('#paperValue').textContent = paperName(paper);
+  $('#paperList').replaceChildren(...Object.values(PAPERS).map(paperRow));
+  $('#otherPaperList').replaceChildren(...Object.values(OTHER_PAPERS).map(paperRow));
+  for (const [id, v] of [['#paperW', paper.w], ['#paperH', paper.h]]) if (document.activeElement !== $(id)) $(id).value = fmtMm(v);
+  $('#paperSizeNote').textContent = state.paperId === 'custom'
+    ? `Custom size, ${CUSTOM_PAPER.min}–${CUSTOM_PAPER.max} mm per side.`
+    : `${paperName(paper)}. Pick another below, or type any size for a custom sheet.`;
+}
+for (const id of ['#paperW', '#paperH']) {
+  $(id).addEventListener('change', () => {
+    const w = parseFloat($('#paperW').value), h = parseFloat($('#paperH').value);
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+    const match = [...Object.values(PAPERS), ...Object.values(OTHER_PAPERS)]
+      .find((p) => Math.abs(p.w - Math.max(w, h)) < 0.05 && Math.abs(p.h - Math.min(w, h)) < 0.05);
+    state.customPaper = { w, h };
+    state.paperId = state.paperId !== 'custom' && match && resolvePaper(state.paperId).w === match.w && resolvePaper(state.paperId).h === match.h
+      ? state.paperId : match ? match.id : 'custom';
+    update();
+  });
+}
+$('#paperSize').addEventListener('submit', (e) => { e.preventDefault(); document.activeElement?.blur(); });
 
 /* ---------------- master update ---------------- */
 function update() {
@@ -989,9 +1014,10 @@ function update() {
   $('#orientSeg').hidden = state.format !== 'one';
   $$('#orientSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === state.layout.one.orientation)));
   $('#layoutValue').textContent = layoutSummary();
+  const pname = PAPERS[paper.id] ? `${paper.id} · ${paper.kind}` : paperName(paper);
   $('#sheetMeta').textContent = state.format === 'two'
-    ? `${paper.id} · ${paper.kind} · cut down the middle`
-    : `${paper.id} · ${paper.kind} · one ${paper.portrait ? 'portrait' : 'landscape'} print`;
+    ? `${pname} · cut down the middle`
+    : `${pname} · one ${paper.portrait ? 'portrait' : 'landscape'} print`;
   buildLayoutSheet();
   buildSwatches();
   buildPaperList();
@@ -1045,7 +1071,7 @@ async function exportSheet() {
   if (!blob) { exportDlg.close(); return toast('Export failed on this device.'); }
 
   const bytes = setPngDpi(new Uint8Array(await blob.arrayBuffer()), dpi);
-  const name = `twinmini-${layout.paper.id}-${dpi}dpi.png`;
+  const name = `twinmini-${layout.paper.id === 'custom' ? `${fmtMm(layout.paper.w)}x${fmtMm(layout.paper.h)}mm` : layout.paper.id}-${dpi}dpi.png`;
   const file = new File([bytes], name, { type: 'image/png' });
   if (exportUrl) URL.revokeObjectURL(exportUrl);
   exportUrl = URL.createObjectURL(file);
@@ -1055,7 +1081,7 @@ async function exportSheet() {
   dl.href = exportUrl;
   dl.download = name;
   dl.removeAttribute('aria-disabled');
-  $('#exportStats').textContent = `${layout.paper.id} · ${px.w} × ${px.h} px · ${dpi} dpi · ${(file.size / 1e6).toFixed(1)} MB`;
+  $('#exportStats').textContent = `${paperName(layout.paper)} · ${px.w} × ${px.h} px · ${dpi} dpi · ${(file.size / 1e6).toFixed(1)} MB`;
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   share.hidden = !canShare;
   dl.classList.toggle('secondary', canShare);

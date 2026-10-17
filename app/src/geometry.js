@@ -22,6 +22,36 @@ export const PAPERS = {
 };
 export const DEFAULT_PAPER = 'RP-108';
 
+// Common photo / printer paper sizes for other printers, landscape (W ≥ H), mm.
+export const OTHER_PAPERS = {
+  '4x6in': { id: '4x6in', kind: '4 × 6 in', note: 'Standard photo print', w: 152.4, h: 101.6 },
+  '5x7in': { id: '5x7in', kind: '5 × 7 in', note: 'Large photo print', w: 177.8, h: 127 },
+  '3.5x5in': { id: '3.5x5in', kind: '3.5 × 5 in', note: 'L size photo print', w: 127, h: 88.9 },
+  '4x4in': { id: '4x4in', kind: '4 × 4 in', note: 'Square photo print', w: 101.6, h: 101.6 },
+  '8x10in': { id: '8x10in', kind: '8 × 10 in', note: 'Enlargement', w: 254, h: 203.2 },
+  A6: { id: 'A6', kind: 'A6', note: 'Postcard (ISO)', w: 148, h: 105 },
+  A5: { id: 'A5', kind: 'A5', note: 'Half A4', w: 210, h: 148 },
+  A4: { id: 'A4', kind: 'A4', note: 'Office printer', w: 297, h: 210 },
+  letter: { id: 'letter', kind: 'US Letter', note: 'Office printer', w: 279.4, h: 215.9 },
+};
+export const CUSTOM_PAPER = { min: 40, max: 420 };
+
+/**
+ * The paper to lay out: a CP1500 set, another common size, or a custom W × H (mm).
+ * Always returned landscape (W ≥ H) so two frames sit side by side.
+ */
+export function resolvePaper(paperId, custom) {
+  if (PAPERS[paperId]) return PAPERS[paperId];
+  if (OTHER_PAPERS[paperId]) return OTHER_PAPERS[paperId];
+  if (paperId === 'custom' && custom) {
+    const a = clamp(Number(custom.w) || 0, CUSTOM_PAPER.min, CUSTOM_PAPER.max);
+    const b = clamp(Number(custom.h) || 0, CUSTOM_PAPER.min, CUSTOM_PAPER.max);
+    const w = Math.max(a, b), h = Math.min(a, b);
+    return { id: 'custom', kind: 'Custom', note: '', w, h };
+  }
+  return PAPERS[DEFAULT_PAPER];
+}
+
 // Photo window shapes (W × H, portrait or square; One Wide can rotate them). Instant-camera
 // film first (image areas in mm), then common photo ratios. Polaroid i-Type / 600 / Go are
 // square; 2 × 3 ZINK (Kodak Printomatic / Smile, Polaroid Snap) is the same shape as 35 mm.
@@ -68,8 +98,8 @@ export function defaultSize(format, orientation) {
  *   Instax look (top border ≈ side border, the rest of the height is the chin).
  * - one + portrait: the sheet is used upright (the SELPHY app rotates it onto the paper).
  */
-export function computeLayout({ paperId = DEFAULT_PAPER, format = 'two', orientation = 'landscape', aspect, flip, w = null, h = null, top = null } = {}) {
-  const base = PAPERS[paperId] || PAPERS[DEFAULT_PAPER];
+export function computeLayout({ paperId = DEFAULT_PAPER, customPaper, format = 'two', orientation = 'landscape', aspect, flip, w = null, h = null, top = null } = {}) {
+  const base = resolvePaper(paperId, customPaper);
   const portrait = format === 'one' && orientation === 'portrait';
   const paper = { ...base, w: portrait ? base.h : base.w, h: portrait ? base.w : base.h, portrait };
   const count = format === 'one' ? 1 : 2;

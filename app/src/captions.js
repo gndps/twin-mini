@@ -109,19 +109,9 @@ export function dateSettings(over = {}) {
   return { id: 'date', kind: 'date', on: true, source: 'photo', ...STYLE_DEFAULTS, size: 4.6, align: 'end', ...rest, fmt: { ...defaultDateFormat(), ...fmt } };
 }
 
-export const BUILTIN_TEMPLATES = [
-  { id: 'b-date', name: 'Date', captions: () => [], date: () => dateSettings() },
-  { id: 'b-note', name: 'Note', captions: () => [textLayer()], date: () => dateSettings({ on: false }) },
-  { id: 'b-note-date', name: 'Note + date', captions: () => [textLayer({ size: 5.6 })], date: () => dateSettings({ size: 3.6, font: 'Kalam', color: 'grey' }) },
-  { id: 'b-datetime', name: 'Date & time', captions: () => [], date: () => dateSettings({ size: 4.2, fmt: { show: 'datetime' } }) },
-  { id: 'b-stamp', name: 'Date stamp', captions: () => [], date: () => dateSettings({ font: 'VT323', size: 4.4, color: 'stamp', fmt: { year: 'short', sep: ' ' } }) },
-  { id: 'b-typed', name: 'Typed', captions: () => [textLayer({ font: 'Special Elite', size: 3.8, align: 'start' })], date: () => dateSettings({ font: 'Special Elite', size: 3, color: 'grey', fmt: { order: 'dmy', month: 'short' } }) },
-  { id: 'b-side', name: 'Side date', captions: () => [], date: () => dateSettings({ edge: 'right', size: 3.4, font: 'IBM Plex Mono', color: 'grey' }) },
-  { id: 'b-none', name: 'None', captions: () => [], date: () => dateSettings({ on: false }) },
-];
-
-export const defaultCaptions = () => BUILTIN_TEMPLATES[0].captions();
-export const defaultDate = () => BUILTIN_TEMPLATES[0].date();
+// A fresh sheet: no text captions, the date on.
+export const defaultCaptions = () => [];
+export const defaultDate = () => dateSettings();
 
 /** Copy captions with fresh ids (templates must never share objects with the sheet). */
 export const cloneLayers = (layers) => layers.map((l) => ({ ...l, texts: l.texts ? [...l.texts] : undefined, id: uid() }));
