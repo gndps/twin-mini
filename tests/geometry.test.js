@@ -72,12 +72,20 @@ test('effectiveDpi: 2268 px across 46 mm ≈ 1252 dpi', () => {
   near(effectiveDpi(2268, 46), 1252.3, 0.1);
 });
 
-import { ASPECTS, FORMATS, defaultSize } from '../app/src/geometry.js';
+import { ASPECTS, FORMATS, defaultSize, windowRatio, CUSTOM_RATIO } from '../app/src/geometry.js';
 
-test('aspect presets come from instant-camera film formats', () => {
-  assert.deepEqual(ASPECTS.map((a) => [a.id, a.w, a.h]), [['mini', 46, 62], ['square', 62, 62], ['wide', 99, 62], ['zink', 50.8, 76.2]]);
+test('shape presets: instant film plus common photo ratios, no Instax Wide', () => {
+  assert.deepEqual(ASPECTS.map((a) => a.id), ['mini', 'square', '4x5', '3x4', '2x3', '5x7', '9x16']);
+  for (const a of ASPECTS) assert.ok(a.w <= a.h, `${a.id} is portrait or square`);
   assert.equal(FORMATS.two.aspect, 'mini');
-  assert.equal(FORMATS.one.aspect, 'wide');
+  assert.equal(FORMATS.one.aspect, '2x3');
+});
+
+test('custom ratio is used as-is and clamped to the slider range', () => {
+  near(windowRatio({ aspect: 'custom', ratio: 0.8 }), 0.8);
+  near(windowRatio({ aspect: 'custom', ratio: 9 }), CUSTOM_RATIO.max);
+  const L = computeLayout({ aspect: 'custom', ratio: 1.3 });
+  near(L.cards[0].win.w / L.cards[0].win.h, 1.3, 2e-3);
 });
 
 test('custom layout stays centred left-right; size keeps the aspect; offset moves vertically', () => {
@@ -86,10 +94,10 @@ test('custom layout stays centred left-right; size keeps the aspect; offset move
       for (const offset of [-1, -0.3, 0, 0.5, 1]) {
         const L = computeLayout({ paperId: 'RP-108', format: 'two', aspect, size, offset });
         for (const c of L.cards) {
-          near(c.win.x - c.x, c.x + c.w - (c.win.x + c.win.w));           // centred horizontally
+          near(c.win.x - c.x, c.x + c.w - (c.win.x + c.win.w));
           const a = ASPECTS.find((x) => x.id === aspect);
-          near(c.win.w / c.win.h, a.w / a.h, 2e-3);                       // fixed aspect
-          assert.ok(c.win.y >= -1e-6 && c.win.y + c.win.h <= c.h + 1e-6);  // inside the card
+          near(c.win.w / c.win.h, a.w / a.h, 2e-3);
+          assert.ok(c.win.y >= -1e-6 && c.win.y + c.win.h <= c.h + 1e-6);
         }
         near(L.cutX, 74);
         if (offset === 0) near(L.cards[0].win.y + L.cards[0].win.h / 2, 50);
@@ -104,17 +112,23 @@ test('offset −1 / +1 puts the photo flush with the top / bottom edge', () => {
   near(d.win.y + d.win.h, d.h);
 });
 
-test('One Wide: single card fills the sheet; portrait turns the sheet and the photo upright', () => {
+test('One Wide: landscape rotates the shape on its side by default and can rotate it back', () => {
   const land = computeLayout({ format: 'one' });
   assert.equal(land.cards.length, 1);
   assert.equal(land.cutX, null);
   near(land.cards[0].w, 148);
-  assert.ok(land.cards[0].win.w > land.cards[0].win.h);
-  assert.ok(land.cards[0].chin.h > land.cards[0].win.y, 'chin below a landscape photo');
-  const port = computeLayout({ format: 'one', orientation: 'portrait' });
+  near(land.cards[0].win.w / land.cards[0].win.h, 3 / 2, 2e-3);
+  assert.ok(land.cards[0].chin.h > land.cards[0].win.y, 'chin below the photo');
+  const upright = computeLayout({ format: 'one', flip: false });
+  near(upright.cards[0].win.w / upright.cards[0].win.h, 2 / 3, 2e-3);
+  // Two Minis never rotates, whatever flip says.
+  near(computeLayout({ format: 'two', flip: true }).ratio, 46 / 62, 1e-6);
+});
+
+test('One Wide portrait: upright sheet, upright photo, flip ignored', () => {
+  const port = computeLayout({ format: 'one', orientation: 'portrait', flip: true });
   near(port.paper.w, 100); near(port.paper.h, 148);
-  assert.ok(port.cards[0].win.h > port.cards[0].win.w);
-  near(port.cards[0].win.h / port.cards[0].win.w, 99 / 62, 2e-3);
-  assert.ok(port.cards[0].chin.h > port.cards[0].win.y, 'chin below a portrait photo');
+  near(port.cards[0].win.w / port.cards[0].win.h, 2 / 3, 2e-3);
+  assert.ok(port.cards[0].chin.h > port.cards[0].win.y);
   near(defaultSize('one', 'portrait'), 0.75);
 });
