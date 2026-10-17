@@ -88,3 +88,40 @@ test('import rejects junk with a readable message', () => {
   assert.throws(() => parseTemplatesText('hello'), /invalid JSON/);
   assert.throws(() => parseTemplatesText('{"name":"x"}'), /captions/);
 });
+
+import { DATE_FORMATS as F, FORMAT_GROUPS, groupLabel, resolveLayers as resolve, dateLayer as mkDate, sanitizeLayers as clean, exportTemplatesText as exp, parseTemplatesText as imp } from '../app/src/captions.js';
+
+test('date, time and date-and-time formats', () => {
+  const d = new Date(2026, 9, 7, 16, 5, 9);
+  const f = (id) => F[id].fmt(d);
+  assert.equal(f('iso'), '2026-10-07');
+  assert.equal(f('us'), '10/07/2026');
+  assert.equal(f('weekday'), 'Wed, 7 Oct');
+  assert.equal(f('long'), 'Wednesday, 7 October 2026');
+  assert.equal(f('t24'), '16:05');
+  assert.equal(f('t12'), '4:05 PM');
+  assert.equal(f('t24s'), '16:05:09');
+  assert.equal(f('dots-t24'), '2026.10.07 16:05');
+  assert.equal(f('dmy-t12'), '7 Oct 2026, 4:05 PM');
+  assert.equal(F.t12.fmt(new Date(2026, 0, 1, 0, 7)), '12:07 AM');
+  assert.deepEqual(FORMAT_GROUPS.map((g) => g.id), ['date', 'time', 'datetime']);
+  for (const k of Object.keys(F)) assert.ok(['date', 'time', 'datetime'].includes(F[k].group), k);
+  assert.equal(groupLabel('t24'), 'Time');
+  assert.equal(groupLabel('nope'), 'Date');
+});
+
+test('timestamp source: photo by default, or now', () => {
+  const photo = new Date(2020, 1, 3, 8, 0), now = new Date(2026, 9, 17, 21, 30);
+  assert.equal(mkDate().source, 'photo');
+  assert.equal(resolve([mkDate({ dateFormat: 'dots-t24' })], 0, photo, now)[0].text, '2020.02.03 08:00');
+  assert.equal(resolve([mkDate({ dateFormat: 'dots-t24', source: 'now' })], 0, photo, now)[0].text, '2026.10.17 21:30');
+});
+
+test('stored date captions are repaired and keep their source through template text', () => {
+  const [a] = clean([{ kind: 'date', dateFormat: 'bogus', source: 'tomorrow' }]);
+  assert.equal(a.dateFormat, 'dots');
+  assert.equal(a.source, 'photo');
+  const [t] = imp(exp([{ name: 'N', layers: [mkDate({ dateFormat: 't12', source: 'now' })] }]));
+  assert.equal(t.layers[0].dateFormat, 't12');
+  assert.equal(t.layers[0].source, 'now');
+});
