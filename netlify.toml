@@ -1,0 +1,4 @@
+# Also deployable on Netlify: static, no build step.
+[build]
+  publish = "app"
+  command = ""

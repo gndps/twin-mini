@@ -1,0 +1,12 @@
+{
+  "name": "twin-mini",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Instax-style frame sheets for the Canon SELPHY CP1500 — fully client-side.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "dev": "python3 -m http.server 5173 --directory app"
+  },
+  "license": "MIT"
+}
