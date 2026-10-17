@@ -4,7 +4,8 @@ import { setJpegDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
 import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
 import {
-  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_FORMATS, cloneLayers, dateLayer, defaultLayers,
+  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_FORMATS, FORMAT_GROUPS, TIME_SOURCES, formatFn, groupLabel,
+  cloneLayers, dateLayer, defaultLayers,
   resolveLayers, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
 } from './captions.js';
 
@@ -27,6 +28,8 @@ const defaultLayout = () => ({
 const defaults = () => ({
   format: 'two', layout: defaultLayout(),
   color: 'white', marks: true, paperId: DEFAULT_PAPER, layers: defaultLayers(), templateId: BUILTIN_TEMPLATES[0].id,
+  // Last date/time choice: new date captions start from it.
+  dateDefaults: { dateFormat: 'dots', source: 'photo' },
 });
 const state = loadState();
 let templates = loadTemplates();
@@ -52,6 +55,8 @@ function loadState() {
   if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
   if (typeof saved.marks === 'boolean') s.marks = saved.marks;
   if (PAPERS[saved.paperId]) s.paperId = saved.paperId;
+  if (DATE_FORMATS[saved.dateDefaults?.dateFormat]) s.dateDefaults.dateFormat = saved.dateDefaults.dateFormat;
+  if (saved.dateDefaults?.source === 'now') s.dateDefaults.source = 'now';
   // Every session opens on Two Minis; any custom size/position is kept.
   for (const f of ['two', 'one']) {
     const L = saved.layout?.[f];
@@ -581,6 +586,7 @@ $('#tplForm').addEventListener('submit', (e) => {
 });
 
 /* ---------------- captions: layers on the main screen ---------------- */
+const stampFor = (l, i = 0) => (l.source === 'now' ? new Date() : photos[i]?.date || today);
 function describe(l) {
   const where = { bottom: 'Bottom', top: 'Top', left: 'Left side', right: 'Right side' }[l.edge];
   const align = { start: 'start', center: 'centre', end: 'end' }[l.align];
@@ -595,12 +601,12 @@ function buildLayerList() {
   list.replaceChildren(...state.layers.map((l) => {
     const row = document.createElement('div');
     row.className = 'layer-row';
-    const sample = (DATE_FORMATS[l.dateFormat] || DATE_FORMATS.dots).fmt(photos[0]?.date || today);
+    const sample = l.kind === 'date' ? formatFn(l.dateFormat)(stampFor(l)) : '';
     row.innerHTML = `
       <span class="layer-icon">${icon(l.kind === 'date' ? 'date' : 'text')}</span>
       <div class="layer-main">
         ${l.kind === 'date'
-          ? `<b>Date</b><small>${sample} · ${describe(l)}</small>`
+          ? `<b>${groupLabel(l.dateFormat)}${l.source === 'now' ? ' · now' : ''}</b><small>${escapeHtml(sample)} · ${describe(l)}</small>`
           : l.same || count() === 1
             ? (l.same
               ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
@@ -630,7 +636,7 @@ $('#addText').addEventListener('click', () => {
   $('#layerList .layer-row:last-child input')?.focus();
 });
 $('#addDate').addEventListener('click', () => {
-  state.layers.push(dateLayer());
+  state.layers.push(dateLayer({ ...state.dateDefaults }));
   captionsChanged({ rebuildList: true });
 });
 
@@ -646,7 +652,7 @@ function openLayer(id) {
 function fillLayerDialog() {
   const l = layerById(editId);
   if (!l) return;
-  $('#layerTitle').textContent = l.kind === 'date' ? 'Date caption' : 'Text caption';
+  $('#layerTitle').textContent = l.kind === 'date' ? `${groupLabel(l.dateFormat)} caption` : 'Text caption';
   $('#layerTextBlock').hidden = l.kind !== 'text';
   $('#layerDateBlock').hidden = l.kind !== 'date';
   if (l.kind === 'text') {
@@ -662,15 +668,47 @@ function fillLayerDialog() {
       captionsChanged({ rebuildList: true });
     }));
   } else {
-    const d = photos[0]?.date || today;
-    $('#dateFormats').replaceChildren(...Object.entries(DATE_FORMATS).map(([k, f]) => {
+    const d = stampFor(l);
+    const group = DATE_FORMATS[l.dateFormat]?.group || 'date';
+    const setDate = (patch) => {
+      Object.assign(l, patch);
+      state.dateDefaults = { dateFormat: l.dateFormat, source: l.source };
+      captionsChanged({ rebuildList: true });
+      fillLayerDialog();
+    };
+    $('#dtGroup').replaceChildren(...FORMAT_GROUPS.map((g) => {
       const b = document.createElement('button');
-      b.className = 'chip';
-      b.setAttribute('aria-checked', String(l.dateFormat === k));
-      b.textContent = f.fmt(d);
-      b.addEventListener('click', () => { l.dateFormat = k; captionsChanged({ rebuildList: true }); fillLayerDialog(); });
+      b.setAttribute('role', 'radio');
+      b.dataset.value = g.id;
+      b.setAttribute('aria-checked', String(g.id === group));
+      b.textContent = g.label;
+      // Switching what to show keeps the style family where possible (e.g. dots → dots-t24).
+      b.addEventListener('click', () => {
+        if (g.id === group) return;
+        const base = l.dateFormat.split('-')[0];
+        const pick = Object.keys(DATE_FORMATS).filter((k) => DATE_FORMATS[k].group === g.id);
+        setDate({ dateFormat: pick.find((k) => k.startsWith(`${base}-`)) || pick.find((k) => k.split('-')[0] === base) || pick[0] });
+      });
       return b;
     }));
+    $('#dateFormats').replaceChildren(...Object.entries(DATE_FORMATS).filter(([, f]) => f.group === group).map(([k, f]) => {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(l.dateFormat === k));
+      b.textContent = f.fmt(d);
+      b.addEventListener('click', () => setDate({ dateFormat: k }));
+      return b;
+    }));
+    $('#dtSource').replaceChildren(...TIME_SOURCES.map((src) => {
+      const b = document.createElement('button');
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String((l.source || 'photo') === src.id));
+      b.textContent = src.label;
+      b.addEventListener('click', () => setDate({ source: src.id }));
+      return b;
+    }));
+    $('#dtSourceNote').textContent = TIME_SOURCES.find((x) => x.id === (l.source || 'photo')).detail;
   }
   $('#layerFontName').textContent = l.font;
   $('#layerFontName').style.fontFamily = fontCss(l.font);
@@ -746,7 +784,7 @@ function buildFontPicker() {
   const group = FONT_GROUPS.find((g) => g.id === fontGroup);
   const sample = l?.kind === 'text'
     ? (l.same ? l.text : l.texts.find(Boolean)) || 'Summer days'
-    : (DATE_FORMATS[l?.dateFormat] || DATE_FORMATS.dots).fmt(photos[0]?.date || today);
+    : formatFn(l?.dateFormat)(l ? stampFor(l) : today);
   $('#fontList').replaceChildren(...group.fonts.map((f) => {
     const b = document.createElement('button');
     b.className = 'font-row';

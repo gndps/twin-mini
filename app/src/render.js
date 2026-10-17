@@ -13,9 +13,9 @@ export const FRAME_COLORS = [
   { id: 'ink', label: 'Black', fill: '#1B1A19', ink: '#EDE8DF' },
 ];
 
-// Cut hint: a few short, sparse hairline dashes on the centre line at the top and bottom
-// paper edges only. Light warm grey, one 300-dpi printer dot wide (≈ 0.085 mm).
-const HINT = { color: '#CFCAC2', width: 0.09, dash: 0.6, gap: 1.8, reach: 7 };
+// Cut guide: short, sparse hairline dashes down the whole centre line, evenly spaced from the
+// top edge to the bottom. Light warm grey, one 300-dpi printer dot wide (≈ 0.085 mm).
+const HINT = { color: '#CFCAC2', width: 0.09, dash: 0.6, gap: 1.8 };
 
 /**
  * Draw the sheet.
@@ -130,16 +130,18 @@ function fit(ctx, text, maxW) {
 
 function drawCutHint(ctx, layout, scale) {
   const { paper, cutX } = layout;
-  const reach = Math.min(HINT.reach, paper.h * 0.08);
+  const step = HINT.dash + HINT.gap;
+  // Centre the dash pattern so both paper edges end the same way.
+  const n = Math.floor((paper.h + HINT.gap) / step);
+  const y0 = (paper.h - (n * step - HINT.gap)) / 2;
   ctx.save();
   ctx.strokeStyle = HINT.color;
   ctx.lineWidth = Math.max(HINT.width, 1 / scale); // ≥ one printer dot and ≥ one device pixel
   ctx.lineCap = 'butt';
   ctx.beginPath();
-  for (let y = 0; y < reach; y += HINT.dash + HINT.gap) {
-    const len = Math.min(HINT.dash, reach - y);
-    ctx.moveTo(cutX, y); ctx.lineTo(cutX, y + len);
-    ctx.moveTo(cutX, paper.h - y); ctx.lineTo(cutX, paper.h - y - len);
+  for (let k = 0; k < n; k++) {
+    const y = y0 + k * step;
+    ctx.moveTo(cutX, y); ctx.lineTo(cutX, y + HINT.dash);
   }
   ctx.stroke();
   ctx.restore();
