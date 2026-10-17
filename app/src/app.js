@@ -30,6 +30,7 @@ const defaultLayout = () => ({ two: defaultLayoutFor('two'), one: defaultLayoutF
 const defaults = () => ({
   format: 'two', layout: defaultLayout(),
   color: 'white', marks: true, paperId: DEFAULT_PAPER, customPaper: { w: 148, h: 100 }, templateId: null,
+  tab: 'frame', // settings tab: frame | captions | paper
   layers: defaultCaptions(), // text captions
   date: defaultDate(),       // the one date per print
 });
@@ -57,6 +58,7 @@ function loadState() {
   if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
   if (typeof saved.marks === 'boolean') s.marks = saved.marks;
   if (PAPERS[saved.paperId] || OTHER_PAPERS[saved.paperId] || saved.paperId === 'custom') s.paperId = saved.paperId;
+  if (['frame', 'captions', 'paper'].includes(saved.tab)) s.tab = saved.tab;
   if (Number.isFinite(saved.customPaper?.w) && Number.isFinite(saved.customPaper?.h)) s.customPaper = { w: saved.customPaper.w, h: saved.customPaper.h };
   // Every session opens on Two Minis; any custom size/position is kept.
   for (const f of ['two', 'one']) {
@@ -217,7 +219,11 @@ function syncCaptionEditors(hits, layout, pxPerMm) {
       inp.placeholder = 'Write a caption…';
       inp.dataset.key = key;
       inp.setAttribute('aria-label', count() === 2 ? `Caption on photo ${h.card + 1}` : 'Caption');
-      inp.addEventListener('focus', () => { editingCaption = { id: inp.dataset.id, card: Number(inp.dataset.card) }; drawPreview(); });
+      inp.addEventListener('focus', () => {
+        editingCaption = { id: inp.dataset.id, card: Number(inp.dataset.card) };
+        setTab('captions'); // typing on the print brings up the caption controls
+        drawPreview();
+      });
       inp.addEventListener('blur', () => { editingCaption = null; drawPreview(); });
       inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
       inp.addEventListener('input', () => {
@@ -1040,7 +1046,6 @@ function paperRow(p) {
 }
 function buildPaperList() {
   const paper = resolvePaper(state.paperId, state.customPaper);
-  $('#paperValue').textContent = paperName(paper);
   $('#paperList').replaceChildren(...Object.values(PAPERS).map(paperRow));
   $('#otherPaperList').replaceChildren(...Object.values(OTHER_PAPERS).map(paperRow));
   for (const [id, v] of [['#paperW', paper.w], ['#paperH', paper.h]]) if (document.activeElement !== $(id)) $(id).value = fmtMm(v);
@@ -1062,6 +1067,33 @@ for (const id of ['#paperW', '#paperH']) {
 }
 $('#paperSize').addEventListener('submit', (e) => { e.preventDefault(); document.activeElement?.blur(); });
 
+/* ---------------- settings tabs: Frame | Captions | Paper ---------------- */
+function setTab(tab) {
+  if (!['frame', 'captions', 'paper'].includes(tab)) tab = 'frame';
+  const changed = state.tab !== tab;
+  state.tab = tab;
+  $$('#tabBar [data-tab]').forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.setAttribute('aria-selected', String(on));
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+  $$('.tab-panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === tab));
+  if (changed) saveState();
+}
+$('#tabBar').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tab]');
+  if (b) setTab(b.dataset.tab);
+});
+$('#tabBar').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const tabs = $$('#tabBar [data-tab]');
+  const i = tabs.findIndex((b) => b.dataset.tab === state.tab);
+  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+  setTab(next.dataset.tab);
+  next.focus();
+});
+
 /* ---------------- master update ---------------- */
 function update() {
   saveState();
@@ -1077,6 +1109,7 @@ function update() {
   $('#sheetMeta').textContent = state.format === 'two'
     ? `${pname} · cut down the middle`
     : `${pname} · one ${paper.portrait ? 'portrait' : 'landscape'} print`;
+  setTab(state.tab);
   buildLayoutSheet();
   buildSwatches();
   buildPaperList();
