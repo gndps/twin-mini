@@ -33,7 +33,7 @@ test('non-JPEG or missing EXIF gives null', () => {
 
 import {
   formatDate, defaultDateFormat, DATE_OPTIONS, dateSettings, textLayer, resolveCaptions, sanitizeLayers,
-  migrateDate, cloneLayers, BUILTIN_TEMPLATES, exportTemplatesText, parseTemplatesText, SHIFT,
+  migrateDate, cloneLayers, defaultCaptions, defaultDate, exportTemplatesText, parseTemplatesText, SHIFT,
 } from '../app/src/captions.js';
 
 const D = new Date(2026, 9, 7, 16, 5, 9); // Wed 7 Oct 2026, 16:05:09
@@ -87,13 +87,10 @@ test('text captions only; date layers from older saves become the single date se
   assert.equal(bad.shift, SHIFT.max);
 });
 
-test('built-in templates: Date first; each has captions and a date setting', () => {
-  assert.equal(BUILTIN_TEMPLATES[0].name, 'Date');
-  for (const t of BUILTIN_TEMPLATES) {
-    assert.ok(Array.isArray(t.captions()));
-    assert.equal(t.date().kind, 'date');
-  }
-  assert.equal(BUILTIN_TEMPLATES.find((t) => t.name === 'None').date().on, false);
+test('a fresh sheet has no text captions and the date on', () => {
+  assert.deepEqual(defaultCaptions(), []);
+  assert.equal(defaultDate().on, true);
+  assert.equal(defaultDate().kind, 'date');
 });
 
 test('template text round-trips captions and the date', () => {

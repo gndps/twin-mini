@@ -136,3 +136,23 @@ test('One Wide portrait: upright sheet, upright photo, flip ignored', () => {
   assert.ok(port.cards[0].chin.h > port.cards[0].win.y);
   near(defaultSize('one', 'portrait'), 0.75);
 });
+
+import { OTHER_PAPERS, resolvePaper } from '../app/src/geometry.js';
+
+test('other printer paper sizes are landscape and standard', () => {
+  assert.deepEqual([OTHER_PAPERS['4x6in'].w, OTHER_PAPERS['4x6in'].h], [152.4, 101.6]);
+  assert.deepEqual([OTHER_PAPERS.A6.w, OTHER_PAPERS.A6.h], [148, 105]);
+  for (const p of Object.values(OTHER_PAPERS)) assert.ok(p.w >= p.h, p.id);
+  const L = computeLayout({ paperId: '5x7in' });
+  near(L.cutX, 177.8 / 2);
+});
+
+test('custom paper: any size, normalised to landscape and clamped', () => {
+  const p = resolvePaper('custom', { w: 90, h: 120 });
+  assert.deepEqual([p.id, p.w, p.h], ['custom', 120, 90]);
+  assert.equal(resolvePaper('custom', { w: 5, h: 9999 }).w, 420);
+  assert.equal(resolvePaper('custom', { w: 5, h: 9999 }).h, 40);
+  const L = computeLayout({ paperId: 'custom', customPaper: { w: 120, h: 90 } });
+  near(L.paper.w, 120); near(L.cutX, 60);
+  assert.equal(resolvePaper('nope').id, 'RP-108');
+});
