@@ -19,7 +19,6 @@ const TEMPLATES_KEY = 'twinmini:templates';
 // Canvas pixel budget: iOS/Safari caps canvases at 16.7 MP; desktop browsers allow far more.
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent) || /iP(hone|ad|od)/.test(navigator.userAgent);
 const MAX_PIXELS = isSafari ? 16_777_216 : 120_000_000;
-const touchFirst = matchMedia('(hover: none)').matches;
 
 // Each format keeps its own shape, size and position, saved independently.
 const defaultLayoutFor = (f) => ({
@@ -295,11 +294,10 @@ function buildSlots() {
         e.stopPropagation();
         onTool(b.dataset.act, i);
       });
-      // Mouse/pen: drag to pan right in the preview. Touch: the preview stays scrollable;
-      // tap selects, tapping the selected photo opens the full-screen crop editor.
+      // Mouse/pen: drag to pan right in the preview. Touch: the preview stays scrollable.
+      // A tap or click (no drag) opens the photo editor, same as the Crop button.
       attachPan(el, () => p, () => el.clientWidth, () => currentLayout().cards[i].win, drawPreview, buildPhotoList,
-        () => (selected === i ? openAdjust(i) : select(i)), { touch: false });
-      el.addEventListener('dblclick', () => openAdjust(i));
+        () => { select(i); openAdjust(i); }, { touch: false });
     }
     el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drop-target'); });
     el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
@@ -318,14 +316,13 @@ const pct = (r, paper) => ({
   width: `${(r.w / paper.w) * 100}%`, height: `${(r.h / paper.h) * 100}%`,
 });
 
-/** Tap on a photo in the preview: select it and bring its controls into view. */
+/** Mark a photo as the current one (preview outline + its row in the Photos tab). */
 function select(i) {
   selected = i;
   setTab('frame'); // the photo's controls live in the Photos tab
   $$('.slot.filled').forEach((s) => s.classList.remove('selected'));
   slotsEl.children[i]?.classList.add('selected');
   $$('.photo-row').forEach((r) => r.classList.toggle('selected', Number(r.dataset.i) === i));
-  if (touchFirst) $(`.photo-row[data-i="${i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /* ---------------- photos ---------------- */
@@ -1106,10 +1103,6 @@ function update() {
   $('#orientSeg').hidden = state.format !== 'one';
   $$('#orientSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === state.layout.one.orientation)));
   $('#layoutValue').textContent = layoutSummary();
-  const pname = PAPERS[paper.id] ? `${paper.id} · ${paper.kind}` : paperName(paper);
-  $('#sheetMeta').textContent = state.format === 'two'
-    ? `${pname} · cut down the middle`
-    : `${pname} · one ${paper.portrait ? 'portrait' : 'landscape'} print`;
   setTab(state.tab);
   buildLayoutSheet();
   buildSwatches();
