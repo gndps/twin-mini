@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, PAPERS, MINI_ASPECT } from '../app/src/geometry.js';
+import { computeLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, PAPERS, MINI_ASPECT, OVERSCAN_MM, FRAMES } from '../app/src/geometry.js';
 
 const near = (a, b, eps = 0.01) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`);
 
@@ -49,11 +49,22 @@ test('every preset fits inside its half of the sheet with ≥ 2 mm overscan room
   }
 });
 
-test('half-sheet preset fills its cell and keeps the 46:62 window', () => {
-  const L = computeLayout({ layout: 'mini', frame: 'half', paperId: 'postcard' });
-  const c = L.cards[0];
-  near(c.w, 74); near(c.h, 100);
-  near(c.win.w / c.win.h, MINI_ASPECT, 1e-3);
+test('half-sheet preset fills its cell, keeps 46:62 and even borders after the borderless trim', () => {
+  for (const paperId of Object.keys(PAPERS)) {
+    const L = computeLayout({ layout: 'mini', frame: 'half', paperId });
+    const [a, b] = L.cards;
+    near(a.w, L.paper.w / 2); near(a.h, L.paper.h); near(b.x, L.cutX);
+    near(a.win.w / a.win.h, MINI_ASPECT, 1e-3);
+    // visible (post-trim) left border == border at the cut line, mirrored on the right card
+    near(a.win.x - OVERSCAN_MM, L.cutX - (a.win.x + a.win.w));
+    near(b.win.x - L.cutX, (L.paper.w - OVERSCAN_MM) - (b.win.x + b.win.w));
+    near(a.win.y - OVERSCAN_MM, 9);
+    assert.ok(a.chin.h > 12, 'keeps a real chin');
+  }
+});
+
+test('Half sheet is the first (default) Mini preset', () => {
+  assert.equal(Object.keys(FRAMES.mini)[0], 'half');
 });
 
 test('custom frames that are too large are flagged', () => {
