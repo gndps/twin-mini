@@ -671,34 +671,47 @@ function buildLayerList() {
     row.className = 'layer-row';
     row.innerHTML = `
       <span class="layer-icon">${icon('text')}</span>
-      <div class="layer-main">
-        ${l.same || count() === 1
-          ? (l.same
-            ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
-            : `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="0" value="${escapeHtml(l.texts[0])}">`)
-          : `<input type="text" maxlength="60" placeholder="Photo 1 caption" aria-label="Photo 1 caption" data-t="0" value="${escapeHtml(l.texts[0])}">
-             <input type="text" maxlength="60" placeholder="Photo 2 caption" aria-label="Photo 2 caption" data-t="1" value="${escapeHtml(l.texts[1])}">`}
-      </div>
+      <div class="layer-main">${textProxies(l)}</div>
       <button class="font-chip" style="font-family:${escapeHtml(fontCss(l.font))}" aria-label="Font: ${escapeHtml(l.font)}">${escapeHtml(l.font)}</button>
       <button class="edit-btn" aria-label="Caption options">${icon('more')}</button>`;
-    $$('input', row).forEach((inp) => {
-      inp.enterKeyHint = 'done';
-      inp.addEventListener('input', () => {
-        if (inp.dataset.t === 'all') l.text = inp.value; else l.texts[Number(inp.dataset.t)] = inp.value;
-        captionsChanged();
-      });
-      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
-    });
+    bindProxies(row, l);
     row.querySelector('.font-chip').addEventListener('click', () => openFontPicker(l.id));
     row.querySelector('.edit-btn').addEventListener('click', () => openLayer(l.id));
     return row;
   }));
 }
 $('#addText').addEventListener('click', () => {
-  state.layers.push(textLayer());
+  const l = textLayer();
+  state.layers.push(l);
   captionsChanged({ rebuildList: true });
-  $('#layerList .layer-row:last-child input')?.focus();
+  editInPlace(l.id, 0);
 });
+
+/**
+ * Caption text is typed on the print itself. Elsewhere (the list, the caption sheet) the text is
+ * shown read-only; tapping it jumps to the matching in-place editor on the preview.
+ */
+function textProxies(l) {
+  const fields = l.same || count() === 1
+    ? [[0, count() === 1 || l.same ? 'Caption' : 'Photo 1 caption', l.same ? l.text : l.texts[0]]]
+    : [[0, 'Photo 1 caption', l.texts[0]], [1, 'Photo 2 caption', l.texts[1]]];
+  return fields.map(([card, label, v]) =>
+    `<button type="button" class="text-proxy${v ? '' : ' empty'}" data-card="${card}" aria-label="Edit ${label} on the print">${escapeHtml(v || label)}</button>`).join('');
+}
+function bindProxies(root, l) {
+  $$('.text-proxy', root).forEach((b) => b.addEventListener('click', () => editInPlace(l.id, Number(b.dataset.card))));
+}
+function editInPlace(id, card) {
+  for (const d of $$('dialog[open]')) d.close();
+  requestAnimationFrame(() => {
+    drawPreview();
+    const inp = capLayer.querySelector(`[data-key="${card}:${id}"]`);
+    if (!inp) return;
+    $('.stage').scrollIntoView?.({ block: 'nearest' });
+    inp.focus({ preventScroll: true });
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  });
+}
 
 /* ---------------- captions: style sheet ---------------- */
 const layerDlg = $('#layerDlg');
@@ -719,15 +732,8 @@ function fillLayerDialog() {
   if (l.kind === 'text') {
     $('#layerSame').checked = !!l.same;
     $('#layerSame').closest('.list-row').hidden = count() === 1;
-    const fields = l.same
-      ? [['all', count() === 1 ? 'Text' : 'Both photos', l.text]]
-      : count() === 1 ? [['0', 'Text', l.texts[0]]] : [['0', 'Photo 1', l.texts[0]], ['1', 'Photo 2', l.texts[1]]];
-    $('#layerTexts').innerHTML = fields.map(([k, label, v]) =>
-      `<label>${label}<input type="text" maxlength="60" data-t="${k}" value="${escapeHtml(v || '')}" enterkeyhint="done"></label>`).join('');
-    $$('#layerTexts input').forEach((inp) => inp.addEventListener('input', () => {
-      if (inp.dataset.t === 'all') l.text = inp.value; else l.texts[Number(inp.dataset.t)] = inp.value;
-      captionsChanged({ rebuildList: true });
-    }));
+    $('#layerTexts').innerHTML = `${textProxies(l)}<p class="list-foot">Tap the text to edit it on the print.</p>`;
+    bindProxies($('#layerTexts'), l);
   } else {
     const f = l.fmt;
     $('#datePreview').textContent = formatDate(stampFor(l), f);
