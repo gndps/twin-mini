@@ -54,3 +54,7 @@ npm test        # geometry + dpi-metadata unit tests (node --test)
 ## Deploy
 
 Static site in `app/`. `vercel.json` (Vercel) and `netlify.toml` (Netlify) both publish that folder as-is; pushes to `main` deploy through the Vercel Git integration, and GitHub Actions runs the tests.
+
+## License
+
+Open source under the [MIT License](LICENSE). Contributions welcome.
