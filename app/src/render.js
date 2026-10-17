@@ -1,37 +1,32 @@
 // Canvas renderer: draws the whole print sheet at any scale (px per mm).
 import { cropRect } from './geometry.js';
+import { fontCss } from './fonts.js';
+import { CAPTION_COLORS } from './captions.js';
 
 export const FRAME_COLORS = [
-  { id: 'white', label: 'Classic white', fill: '#FFFFFF', ink: '#3A3631' },
+  { id: 'white', label: 'White', fill: '#FFFFFF', ink: '#2E2B28' },
   { id: 'cream', label: 'Cream', fill: '#F6F1E6', ink: '#3A3631' },
   { id: 'blush', label: 'Blush', fill: '#F3DCD6', ink: '#4A3330' },
   { id: 'sage', label: 'Sage', fill: '#DCE4D6', ink: '#2F3A2C' },
   { id: 'sky', label: 'Sky', fill: '#D9E3EC', ink: '#2C3540' },
   { id: 'butter', label: 'Butter', fill: '#F5EAC2', ink: '#4A4128' },
-  { id: 'ink', label: 'Ink black', fill: '#1B1A19', ink: '#EDE8DF' },
+  { id: 'ink', label: 'Black', fill: '#1B1A19', ink: '#EDE8DF' },
 ];
 
-export const FONTS = {
-  hand: { label: 'Handwritten', css: '"Caveat", "Bradley Hand", cursive', weight: 500, size: 6.2 },
-  serif: { label: 'Serif', css: '"Fraunces", Georgia, serif', weight: 400, size: 3.6 },
-  sans: { label: 'Sans', css: '"Inter", system-ui, sans-serif', weight: 500, size: 3.0 },
-};
-
-// Light warm grey: faint on white paper but still visible after cutting.
-const GUIDE = '#C9C4BC';
-// Thinnest line the CP1500 reliably prints: one 300-dpi dot ≈ 0.085 mm.
-const HAIRLINE_MM = 0.09;
+// Cut hint: a few short, sparse hairline dashes on the centre line at the top and bottom
+// paper edges only. Light warm grey, one 300-dpi printer dot wide (≈ 0.085 mm).
+const HINT = { color: '#CFCAC2', width: 0.09, dash: 0.6, gap: 1.8, reach: 7 };
 
 /**
  * Draw the sheet.
  * @param ctx CanvasRenderingContext2D sized paper.w*scale × paper.h*scale
- * @param layout result of computeLayout()
- * @param slots [{photo, caption}] per card (photo may be null)
- * @param opts {scale, color, font, marks, sourceFor(photo, scale) -> {img, factor}}
+ * @param layout result of computeLayout() (cards may be a subset)
+ * @param slots [{photo, captions}] per card; captions are resolved layers (see resolveLayers)
+ * @param opts {scale, color, marks, sourceFor(photo, pxPerSrc) -> {img}, origin?, keepBackground?}
  */
 export function renderSheet(ctx, layout, slots, opts) {
-  const { scale, color, font, marks } = opts;
-  const { paper, cards } = layout;
+  const { scale, color, marks } = opts;
+  const { cards } = layout;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (!opts.keepBackground) {
@@ -46,19 +41,15 @@ export function renderSheet(ctx, layout, slots, opts) {
     ctx.fillStyle = color.fill;
     ctx.fillRect(card.x, card.y, card.w, card.h);
     const { win } = card;
-    if (slot.photo) {
-      drawPhoto(ctx, slot.photo, win, scale, opts.sourceFor);
-    } else if (opts.placeholder) {
-      opts.placeholder(ctx, win, i);
-    } else {
-      // Blank frame: a soft neutral window so an empty card still reads as a frame.
-      ctx.fillStyle = color.id === 'ink' ? '#2A2826' : '#EFEBE4';
+    if (slot.photo) drawPhoto(ctx, slot.photo, win, scale, opts.sourceFor);
+    else {
+      ctx.fillStyle = color.id === 'ink' ? '#2A2826' : '#EFEDE9';
       ctx.fillRect(win.x, win.y, win.w, win.h);
     }
-    if (slot.caption) drawCaption(ctx, card, slot.caption, FONTS[font] || FONTS.hand, color.ink);
+    if (slot.captions?.length) drawCaptions(ctx, card, slot.captions, color.ink);
   });
 
-  if (marks) drawMarks(ctx, layout, scale);
+  if (marks) drawCutHint(ctx, layout, scale);
   ctx.restore();
 }
 
@@ -88,60 +79,71 @@ function drawPhoto(ctx, photo, win, scale, sourceFor) {
   ctx.restore();
 }
 
-function drawCaption(ctx, card, text, font, ink) {
-  const { chin } = card;
-  const size = Math.min(font.size, chin.h * 0.42);
-  ctx.save();
-  ctx.fillStyle = ink;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `${font.weight} ${size}px ${font.css}`;
-  let t = text;
-  const maxW = chin.w - 8;
-  while (t.length > 1 && ctx.measureText(t).width > maxW) t = t.slice(0, -1);
-  if (t !== text) t = t.trimEnd() + '…';
-  ctx.fillText(t, chin.x + chin.w / 2, chin.y + chin.h * 0.5);
-  ctx.restore();
-}
+const LINE = 1.22; // line height as a multiple of the font size
 
-function drawMarks(ctx, layout, scale) {
-  const { paper, cards, cutX } = layout;
-  const lw = Math.max(HAIRLINE_MM, 1 / scale); // ≥ one printer dot and ≥ one device pixel
-  ctx.save();
-  ctx.strokeStyle = GUIDE;
-  ctx.lineWidth = lw;
-  const gap = 1.2, len = 3.5;
-  for (const c of cards) {
-    const corners = [[c.x, c.y, -1, -1], [c.x + c.w, c.y, 1, -1], [c.x, c.y + c.h, -1, 1], [c.x + c.w, c.y + c.h, 1, 1]];
-    ctx.beginPath();
-    for (const [x, y, dx, dy] of corners) {
-      // horizontal tick (outside the card, along its top/bottom edge line)
-      if (inside(paper, x + dx * gap, y) && !nearCut(x + dx * gap, cutX)) {
-        ctx.moveTo(x + dx * gap, y); ctx.lineTo(x + dx * (gap + len), y);
-      }
-      if (inside(paper, x, y + dy * gap)) {
-        ctx.moveTo(x, y + dy * gap); ctx.lineTo(x, y + dy * (gap + len));
-      }
+/**
+ * Captions are grouped by edge and stacked in reading order, centred across the border band.
+ * Along the edge they align to the photo window (start / centre / end), like hand-written
+ * notes on real film. Side captions are rotated: the left reads upwards, the right downwards.
+ */
+function drawCaptions(ctx, card, captions, autoInk) {
+  const { win } = card;
+  for (const edge of ['bottom', 'top', 'left', 'right']) {
+    const lines = captions.filter((c) => c.edge === edge);
+    if (!lines.length) continue;
+    const band = edge === 'bottom' ? card.chin : edge === 'top' ? card.top : card[edge];
+    const vertical = edge === 'left' || edge === 'right';
+    const across = vertical ? band.w : band.h;          // room across the band
+    const length = vertical ? win.h : win.w;             // room along the edge
+    const total = lines.reduce((s, l) => s + l.size * LINE, 0);
+    const k = total > across * 0.92 ? (across * 0.92) / total : 1; // shrink to fit the band
+
+    ctx.save();
+    if (vertical) {
+      ctx.translate(band.x + band.w / 2, win.y + win.h / 2);
+      ctx.rotate(edge === 'left' ? -Math.PI / 2 : Math.PI / 2);
+    } else {
+      ctx.translate(win.x + win.w / 2, band.y + band.h / 2);
     }
-    ctx.stroke();
+    let y = -(total * k) / 2;
+    for (const l of lines) {
+      const size = l.size * k;
+      const lh = size * LINE;
+      ctx.font = `${size}px ${fontCss(l.font)}`;
+      ctx.fillStyle = CAPTION_COLORS.find((c) => c.id === l.color)?.value || autoInk;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = l.align === 'start' ? 'left' : l.align === 'end' ? 'right' : 'center';
+      const x = l.align === 'start' ? -length / 2 : l.align === 'end' ? length / 2 : 0;
+      ctx.fillText(fit(ctx, l.text, length), x, y + lh / 2);
+      y += lh;
+    }
+    ctx.restore();
   }
-  if (cutX != null) {
-    // Centre cut line, dashed, only where it does not run over a card.
-    ctx.setLineDash([1.6, 1.2]);
-    ctx.beginPath();
-    const top = Math.min(...cards.map((c) => c.y));
-    const bottom = Math.max(...cards.map((c) => c.y + c.h));
-    // Only skip the stretch where a single card spans the cut; abutting cards share it as an edge.
-    const touches = cards.some((c) => c.x < cutX - 0.01 && c.x + c.w > cutX + 0.01);
-    if (!touches) { ctx.moveTo(cutX, 0); ctx.lineTo(cutX, paper.h); }
-    else { ctx.moveTo(cutX, 0); ctx.lineTo(cutX, top); ctx.moveTo(cutX, bottom); ctx.lineTo(cutX, paper.h); }
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
-const inside = (p, x, y) => x >= 0 && x <= p.w && y >= 0 && y <= p.h;
-const nearCut = (x, cutX) => cutX != null && Math.abs(x - cutX) < 0.01;
+function fit(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxW) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
+}
+
+function drawCutHint(ctx, layout, scale) {
+  const { paper, cutX } = layout;
+  const reach = Math.min(HINT.reach, paper.h * 0.08);
+  ctx.save();
+  ctx.strokeStyle = HINT.color;
+  ctx.lineWidth = Math.max(HINT.width, 1 / scale); // ≥ one printer dot and ≥ one device pixel
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  for (let y = 0; y < reach; y += HINT.dash + HINT.gap) {
+    const len = Math.min(HINT.dash, reach - y);
+    ctx.moveTo(cutX, y); ctx.lineTo(cutX, y + len);
+    ctx.moveTo(cutX, paper.h - y); ctx.lineTo(cutX, paper.h - y - len);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
 
 /**
  * Build a cache of progressively halved copies of a bitmap so large downscales stay sharp

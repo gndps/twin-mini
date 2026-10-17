@@ -3,93 +3,55 @@
 
 export const MM_PER_INCH = 25.4;
 
-// Instax image window aspect (46 × 62 mm on real Mini film).
+// Instax Mini image window aspect (46 × 62 mm on real film).
 export const MINI_ASPECT = 46 / 62;
-export const WIDE_ASPECT = 99 / 62;
 
+// Canon ink/paper sets the SELPHY CP1500 accepts, by product code. Sizes are the printed
+// sheet after the perforated tabs are removed (CP1500 manual, Specifications), laid out
+// landscape so the two frames sit side by side. The 8-label sheet (KC-18IL, 22 × 17.3 mm
+// labels) is left out: a label is too small to hold a frame.
 export const PAPERS = {
-  postcard: { id: 'postcard', label: 'SELPHY Postcard', detail: '148 × 100 mm · KP-108IN', w: 148, h: 100 },
-  '4x6': { id: '4x6', label: '4 × 6 in', detail: '152.4 × 101.6 mm', w: 152.4, h: 101.6 },
+  'RP-108': { id: 'RP-108', kind: 'Postcard', note: '108 sheets', w: 148, h: 100 },
+  'KP-108IN': { id: 'KP-108IN', kind: 'Postcard', note: '108 sheets', w: 148, h: 100 },
+  'RP-54': { id: 'RP-54', kind: 'Postcard', note: '54 sheets', w: 148, h: 100 },
+  'KP-36IP': { id: 'KP-36IP', kind: 'Postcard', note: '36 sheets', w: 148, h: 100 },
+  'KL-36IP': { id: 'KL-36IP', kind: 'L size', note: '36 sheets', w: 119, h: 89 },
+  'KC-36IP': { id: 'KC-36IP', kind: 'Card size', note: '36 sheets', w: 86, h: 54 },
+  'KC-18IF': { id: 'KC-18IF', kind: 'Card size', note: 'Full-size stickers', w: 86, h: 54 },
+  'KC-18IS': { id: 'KC-18IS', kind: 'Square label', note: 'Square stickers', w: 54, h: 54 },
 };
+export const DEFAULT_PAPER = 'RP-108';
 
-// Frame specs: window size + margins. Card = window + margins.
-// `fill: true` means the card grows to fill its half of the sheet (only cut the middle).
-// Borderless SELPHY prints trim roughly this much from every paper edge.
-export const OVERSCAN_MM = 2;
-
-export const FRAMES = {
-  mini: {
-    half: { label: 'Half sheet', detail: 'Cut the middle only', fill: true, side: 9, top: 9 },
-    'true': { label: 'True Mini', detail: '54 × 86 mm · real film size', winW: 46, winH: 62, top: 6, side: 4, chin: 18 },
-    large: { label: 'Large', detail: '59 × 95 mm · +10%', winW: 50.6, winH: 68.2, top: 6.6, side: 4.4, chin: 19.8 },
-    compact: { label: 'Compact', detail: '2 × 3 in · 50.8 × 76.2 mm', winW: 42.33, winH: 57.07, top: 4.83, side: 4.23, chin: 14.3 },
-  },
-  wide: {
-    'true': { label: 'True Wide', detail: '108 × 86 mm · real film size', winW: 99, winH: 62, top: 6, side: 4.5, chin: 18 },
-    large: { label: 'Large', detail: '119 × 95 mm · +10%', winW: 108.9, winH: 68.2, top: 6.6, side: 4.95, chin: 19.8 },
-  },
-};
-
-export function frameSpec(layout, frameId, paper, custom) {
-  if (frameId === 'custom') {
-    const winW = custom.winW;
-    const winH = layout === 'wide' ? winW / WIDE_ASPECT : winW / MINI_ASPECT;
-    return { winW, winH, top: custom.top, side: custom.side, chin: custom.chin };
-  }
-  const f = FRAMES[layout][frameId] || FRAMES[layout]['true'];
-  if (!f.fill) return f;
-  // The card is the whole cell, so its outer edges fall in the borderless trim zone.
-  // Lay the window out inside what survives the trim (cell minus overscan on the three
-  // paper edges) so the borders come out even; the frame colour still bleeds to the edge.
-  const cell = cellSize(layout, paper);
-  const visW = cell.w - OVERSCAN_MM;
-  const visH = cell.h - 2 * OVERSCAN_MM;
-  const winW = visW - 2 * f.side;
-  const winH = winW / MINI_ASPECT;
-  return { winW, winH, top: f.top, side: f.side, chin: visH - f.top - winH, fill: true };
-}
-
-export function cellSize(layout, paper) {
-  return layout === 'wide' ? { w: paper.w, h: paper.h } : { w: paper.w / 2, h: paper.h };
-}
+// Border proportions of the half-sheet frame, relative to the half's width
+// (9 mm on a 74 mm postcard half). The chin takes whatever height is left.
+const SIDE_RATIO = 9 / 74;
 
 const r = (n) => Math.round(n * 1000) / 1000;
 
 /**
- * Compute every rectangle on the sheet.
- * @returns {{paper, cards: Array<{x,y,w,h,win:{x,y,w,h},chin:{x,y,w,h}}>, cutX: number|null, fits: boolean, overflow: number}}
+ * The sheet is split into two equal halves; each half is one Instax-style card:
+ * equal side and top borders, a 46:62 photo window, and the rest of the height as the chin.
+ * @returns {{paper, cutX, cards: Array<{x,y,w,h,win,chin,top,left,right}>}}
  */
-export function computeLayout({ layout = 'mini', frame = 'true', paperId = 'postcard', custom } = {}) {
-  const paper = PAPERS[paperId] || PAPERS.postcard;
-  const spec = frameSpec(layout, frame, paper, custom || { winW: 46, top: 6, side: 4, chin: 18 });
-  const cardW = spec.winW + 2 * spec.side;
-  const cardH = spec.top + spec.winH + spec.chin;
-  const cell = cellSize(layout, paper);
-  const count = layout === 'wide' ? 1 : 2;
-  const cards = [];
-  for (let i = 0; i < count; i++) {
-    if (spec.fill) {
-      // Bleed card: fills the cell; visible part starts OVERSCAN_MM in from the outer edges.
-      const x = i * cell.w, vx = i === 0 ? x + OVERSCAN_MM : x;
-      const vy = OVERSCAN_MM, vw = cell.w - OVERSCAN_MM;
-      cards.push({
-        x: r(x), y: 0, w: r(cell.w), h: r(cell.h), bleed: true,
-        visible: { x: r(vx), y: vy, w: r(vw), h: r(cell.h - 2 * OVERSCAN_MM) },
-        win: { x: r(vx + spec.side), y: r(vy + spec.top), w: r(spec.winW), h: r(spec.winH) },
-        chin: { x: r(vx), y: r(vy + spec.top + spec.winH), w: r(vw), h: r(spec.chin) },
-      });
-      continue;
-    }
-    const x = i * cell.w + (cell.w - cardW) / 2;
-    const y = (cell.h - cardH) / 2;
-    cards.push({
-      x: r(x), y: r(y), w: r(cardW), h: r(cardH),
-      win: { x: r(x + spec.side), y: r(y + spec.top), w: r(spec.winW), h: r(spec.winH) },
-      chin: { x: r(x), y: r(y + spec.top + spec.winH), w: r(cardW), h: r(spec.chin) },
-    });
-  }
-  const overflow = spec.fill ? 0 : Math.max(cardW - cell.w, cardH - cell.h, 0);
-  return { paper, cards, cutX: count === 2 ? paper.w / 2 : null, fits: overflow < 0.01, overflow: r(overflow), spec };
+export function computeLayout(paperId = DEFAULT_PAPER) {
+  const paper = PAPERS[paperId] || PAPERS[DEFAULT_PAPER];
+  const cw = paper.w / 2, ch = paper.h;
+  const side = cw * SIDE_RATIO;
+  const winW = cw - 2 * side;
+  const winH = winW / MINI_ASPECT;
+  const cards = [0, 1].map((i) => {
+    const x = i * cw;
+    const win = { x: r(x + side), y: r(side), w: r(winW), h: r(winH) };
+    return {
+      x: r(x), y: 0, w: r(cw), h: r(ch), win,
+      // Border bands that captions can sit in.
+      top: { x: r(x), y: 0, w: r(cw), h: win.y },
+      chin: { x: r(x), y: r(win.y + win.h), w: r(cw), h: r(ch - win.y - win.h) },
+      left: { x: r(x), y: 0, w: r(side), h: r(ch) },
+      right: { x: r(x + cw - side), y: 0, w: r(side), h: r(ch) },
+    };
+  });
+  return { paper, cutX: cw, cards };
 }
 
 export const mmToPx = (mm, dpi) => (mm / MM_PER_INCH) * dpi;
@@ -123,13 +85,10 @@ export function effectiveDpi(cropW, winWmm) {
 }
 
 /**
- * Pick the output dpi. 'auto' matches the sharpest photo (so no source pixel is thrown away),
- * bounded below by the printer's native 300 dpi and above by 1200 dpi and the canvas pixel budget.
+ * Output dpi: as high as the sharpest photo supports, so no source pixel is thrown away,
+ * never below the printer's native 300 dpi, and within the browser's canvas pixel budget.
  */
-export function chooseDpi(mode, photoDpis, paper, maxPixels) {
-  const budget = Math.floor(Math.sqrt(maxPixels / (paper.w * paper.h)) * MM_PER_INCH);
-  let dpi = mode === 'auto'
-    ? clamp(Math.ceil(Math.max(300, ...photoDpis)), 300, 1200)
-    : Number(mode);
-  return Math.min(dpi, budget);
+export function chooseDpi(photoDpis, paper, maxPixels) {
+  const budget = Math.floor(Math.sqrt(maxPixels / ((paper.w / MM_PER_INCH) * (paper.h / MM_PER_INCH))));
+  return Math.max(1, Math.min(Math.ceil(Math.max(300, ...photoDpis)), budget));
 }

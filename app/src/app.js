@@ -1,31 +1,28 @@
-import { computeLayout, FRAMES, PAPERS, OVERSCAN_MM, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
-import { renderSheet, makeSourceCache, FRAME_COLORS, FONTS } from './render.js';
-import { setPngDpi, setJpegDpi } from './dpi.js';
+import { computeLayout, PAPERS, DEFAULT_PAPER, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
+import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
+import { setJpegDpi } from './dpi.js';
+import { readExifDate } from './exif.js';
+import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
+import {
+  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_FORMATS, cloneLayers, dateLayer, defaultLayers,
+  resolveLayers, sanitizeLayers, textLayer,
+} from './captions.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const PREVIEW_LONG_SIDE = 2400;
-const STORE_KEY = 'twinmini:v1';
+const STATE_KEY = 'twinmini:v2';
+const TEMPLATES_KEY = 'twinmini:templates';
 
+// Canvas pixel budget: iOS/Safari caps canvases at 16.7 MP; desktop browsers allow far more.
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent) || /iP(hone|ad|od)/.test(navigator.userAgent);
-const MAX_PIXELS = isSafari ? 16_777_216 : 48_000_000;
+const MAX_PIXELS = isSafari ? 16_777_216 : 120_000_000;
 const touchFirst = matchMedia('(hover: none)').matches;
 
-const defaults = {
-  layout: 'mini',
-  frame: { mini: 'half', wide: 'true' },
-  custom: { mini: { winW: 46, top: 6, side: 4, chin: 18 }, wide: { winW: 99, top: 6, side: 4.5, chin: 18 } },
-  paperId: 'postcard',
-  color: 'white',
-  font: 'hand',
-  marks: true,
-  repeat: false,
-  dpiMode: 'auto',
-  format: 'png',
-  captions: ['', ''],
-};
+const defaults = () => ({ color: 'white', marks: true, paperId: DEFAULT_PAPER, layers: defaultLayers(), templateId: BUILTIN_TEMPLATES[0].id });
 const state = loadState();
+let templates = loadTemplates();
 const photos = [null, null];
 let selected = null;
 
@@ -33,39 +30,39 @@ const fullSource = makeSourceCache();
 const previewCache = makeSourceCache();
 const previewSource = (p, pxPerSrc) => previewCache({ bitmap: p.preview }, pxPerSrc * (p.width / p.preview.width));
 
-/* ---------------- persistence ---------------- */
+/* ---------------- persistence (everything lives in this browser) ---------------- */
+function readJson(key) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+}
+function writeJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
+}
 function loadState() {
-  let s = structuredClone(defaults);
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (saved) s = { ...s, ...saved, frame: { ...s.frame, ...saved.frame }, custom: { ...s.custom, ...saved.custom } };
-  } catch { /* storage unavailable */ }
-  // Every session opens on two Minis, Half sheet: print, cut the middle, done.
-  s.layout = 'mini';
-  s.frame.mini = 'half';
+  const s = defaults();
+  const saved = readJson(STATE_KEY);
+  if (!saved) return s;
+  if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
+  if (typeof saved.marks === 'boolean') s.marks = saved.marks;
+  if (PAPERS[saved.paperId]) s.paperId = saved.paperId;
+  const layers = sanitizeLayers(saved.layers);
+  if (layers) { s.layers = layers; s.templateId = saved.templateId ?? null; }
   return s;
 }
-function saveState() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+const saveState = () => writeJson(STATE_KEY, state);
+function loadTemplates() {
+  const t = readJson(TEMPLATES_KEY);
+  return Array.isArray(t) ? t.filter((x) => x?.name).map((x) => ({ ...x, layers: sanitizeLayers(x.layers) || [] })) : [];
 }
+const saveTemplates = () => writeJson(TEMPLATES_KEY, templates);
 
 /* ---------------- derived ---------------- */
-const slotCount = () => (state.layout === 'wide' ? 1 : 2);
 const frameColor = () => FRAME_COLORS.find((c) => c.id === state.color) || FRAME_COLORS[0];
-function currentLayout() {
-  return computeLayout({
-    layout: state.layout,
-    frame: state.frame[state.layout],
-    paperId: state.paperId,
-    custom: state.custom[state.layout],
-  });
-}
+const currentLayout = () => computeLayout(state.paperId);
+const today = new Date();
 function renderSlots() {
-  const n = slotCount();
-  const placed = photos.slice(0, n).filter(Boolean);
-  return Array.from({ length: n }, (_, i) => ({
-    photo: photos[i] || (state.repeat && n === 2 && placed.length === 1 ? placed[0] : null),
-    caption: state.captions[i] || '',
+  return [0, 1].map((i) => ({
+    photo: photos[i],
+    captions: resolveLayers(state.layers, i, photos[i]?.date || today),
   }));
 }
 function photoDpi(photo, win) {
@@ -77,8 +74,20 @@ function quality(dpi) {
   if (dpi >= 200) return { cls: 'ok', label: 'Good' };
   return { cls: 'low', label: 'Low' };
 }
-const slotName = (i) => (slotCount() === 1 ? 'Photo' : `Photo ${i + 1}`);
-const slotSide = (i) => (slotCount() === 1 ? '' : i === 0 ? 'Left half' : 'Right half');
+const slotName = (i) => `Photo ${i + 1}`;
+const slotSide = (i) => (i === 0 ? 'Left half' : 'Right half');
+const layerById = (id) => state.layers.find((l) => l.id === id);
+const fontsInUse = () => [...new Set(state.layers.map((l) => l.font))];
+
+/** Any caption edit means the sheet no longer matches a template exactly. */
+function captionsChanged({ rebuildList = false } = {}) {
+  state.templateId = null;
+  saveState();
+  buildTemplateChips();
+  if (rebuildList) buildLayerList();
+  loadFonts(fontsInUse()).then(drawPreview);
+  drawPreview();
+}
 
 /* ---------------- photo loading ---------------- */
 async function loadPhoto(file) {
@@ -106,21 +115,24 @@ async function loadPhoto(file) {
   const pctx = pv.getContext('2d');
   pctx.imageSmoothingQuality = 'high';
   pctx.drawImage(small, 0, 0, pv.width, pv.height);
-  return { bitmap: img, preview: pv, url, width, height, rot: 0, zoom: 1, cx: 0.5, cy: 0.5, name: file.name, bytes: file.size };
+  let date = null;
+  try { date = readExifDate(await file.slice(0, 256 * 1024).arrayBuffer()); } catch { /* not a JPEG */ }
+  return {
+    bitmap: img, preview: pv, url, width, height, rot: 0, zoom: 1, cx: 0.5, cy: 0.5,
+    name: file.name, date: date || new Date(file.lastModified || Date.now()),
+  };
 }
 
 async function placeFiles(files, target) {
   const images = [...files].filter((f) => f.type.startsWith('image/') || /\.(hei[cf]|jpe?g|png|webp|avif)$/i.test(f.name));
   if (!images.length) return toast('Those files aren’t images.');
-  const n = slotCount();
-  const all = Array.from({ length: n }, (_, i) => i);
   let order;
-  if (target != null) order = [target, ...all.filter((i) => i !== target && !photos[i])];
+  if (target != null) order = [target, ...[0, 1].filter((i) => i !== target && !photos[i])];
   else {
-    order = all.filter((i) => !photos[i]);
-    if (!order.length) order = all;
+    order = [0, 1].filter((i) => !photos[i]);
+    if (!order.length) order = [0, 1];
   }
-  if (images.length > order.length) toast(`The sheet holds ${n === 2 ? 'two photos' : 'one photo'}.`);
+  if (images.length > order.length) toast('The sheet holds two photos.');
   await Promise.all(images.slice(0, order.length).map(async (file, k) => {
     try {
       const p = await loadPhoto(file);
@@ -145,8 +157,7 @@ function drawPreview() {
   canvas.width = Math.round(rect.width * dpr);
   canvas.height = Math.round(rect.height * dpr);
   renderSheet(canvas.getContext('2d'), layout, renderSlots(), {
-    scale: canvas.width / layout.paper.w,
-    color: frameColor(), font: state.font, marks: state.marks, sourceFor: previewSource,
+    scale: canvas.width / layout.paper.w, color: frameColor(), marks: state.marks, sourceFor: previewSource,
   });
   drawThumbs();
 }
@@ -159,19 +170,22 @@ const ICONS = {
   replace: '<path d="M3 13.5 7 9.5l3 3 3.5-4 3.5 4"/><rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/>',
   remove: '<path d="M5 6h10M8 6V4.5h4V6M6.5 6l.7 9.5h5.6l.7-9.5"/>',
   plus: '<path d="M10 4v12M4 10h12"/>',
+  date: '<rect x="3" y="4.5" width="14" height="12" rx="2"/><path d="M3 8.5h14M7 3v3M13 3v3"/>',
+  text: '<path d="M4 5h12M10 5v11"/>',
+  more: '<circle cx="5" cy="10" r=".9"/><circle cx="10" cy="10" r=".9"/><circle cx="15" cy="10" r=".9"/>',
+  check: '<path d="m4.5 10.5 3.5 3.5 7.5-8"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 20 20" aria-hidden="true">${ICONS[k]}</svg>`;
 
 function buildSlots() {
   const layout = currentLayout();
   const { paper } = layout;
-  const slots = renderSlots();
   slotsEl.replaceChildren(...layout.cards.map((card, i) => {
     const el = document.createElement('div');
     el.className = 'slot';
     Object.assign(el.style, pct(card.win, paper));
-    const shown = slots[i].photo;
-    if (!shown) {
+    const p = photos[i];
+    if (!p) {
       el.classList.add('empty');
       el.tabIndex = 0;
       el.setAttribute('role', 'button');
@@ -182,8 +196,8 @@ function buildSlots() {
     } else {
       el.classList.add('filled');
       el.classList.toggle('selected', selected === i);
-      el.innerHTML = `<div class="slot-tools" role="toolbar" aria-label="${slotName(i)} photo">
-          ${toolBtn('rotl', 'Rotate left')}${toolBtn('rotr', 'Rotate right')}${toolBtn('flip', 'Flip 180°')}${toolBtn('adjust', 'Crop & zoom')}
+      el.innerHTML = `<div class="slot-tools" role="toolbar" aria-label="${slotName(i)}">
+          ${toolBtn('rotl', 'Turn left')}${toolBtn('rotr', 'Turn right')}${toolBtn('flip', 'Flip 180°')}${toolBtn('adjust', 'Crop & zoom')}
         </div>`;
       el.querySelector('.slot-tools').addEventListener('click', (e) => {
         const b = e.target.closest('button');
@@ -193,7 +207,7 @@ function buildSlots() {
       });
       // Mouse/pen: drag to pan right in the preview. Touch: the preview stays scrollable;
       // tap selects, tapping the selected photo opens the full-screen crop editor.
-      attachPan(el, () => shown, () => el.clientWidth, () => currentLayout().cards[i].win, drawPreview, buildPhotoList,
+      attachPan(el, () => p, () => el.clientWidth, () => currentLayout().cards[i].win, drawPreview, buildPhotoList,
         () => (selected === i ? openAdjust(i) : select(i)), { touch: false });
       el.addEventListener('dblclick', () => openAdjust(i));
     }
@@ -223,21 +237,18 @@ function select(i) {
   if (touchFirst) $(`.photo-row[data-i="${i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-/* ---------------- photo list (primary controls) ---------------- */
+/* ---------------- photos ---------------- */
 const listEl = $('#photoList');
 
 function buildPhotoList() {
   const layout = currentLayout();
-  const slots = renderSlots();
-  const n = slotCount();
   const rows = [];
-  if (n === 2 && !photos[0] && !photos[1]) {
+  if (!photos[0] && !photos[1]) {
     rows.push(addRow('Add photos', 'Choose one or two', null));
   } else {
-    for (let i = 0; i < n; i++) {
-      const p = slots[i].photo;
-      if (!p) { rows.push(addRow(n === 2 ? `Add photo ${i + 1}` : 'Add photo', n === 2 ? `${slotSide(i)} · or leave it blank` : '', i)); continue; }
-      const repeated = !photos[i];
+    for (const i of [0, 1]) {
+      const p = photos[i];
+      if (!p) { rows.push(addRow(`Add photo ${i + 1}`, `${slotSide(i)} · or leave it blank`, i)); continue; }
       const { dpi } = photoDpi(p, layout.cards[i].win);
       const q = quality(dpi);
       const row = document.createElement('div');
@@ -246,15 +257,14 @@ function buildPhotoList() {
       row.classList.toggle('selected', selected === i);
       row.innerHTML = `
         <div class="photo-main">
-          <button class="photo-thumb" data-act="${repeated ? 'own' : 'replace'}" aria-label="Replace ${slotName(i).toLowerCase()} photo"><canvas width="88" height="112"></canvas></button>
+          <button class="photo-thumb" data-act="replace" aria-label="Replace ${slotName(i).toLowerCase()}"><canvas width="88" height="112"></canvas></button>
           <div class="photo-text">
             <b>${slotName(i)}</b>
-            <small>${slotSide(i) ? `${slotSide(i)} · ` : ''}${repeated ? 'repeats photo 1' : `<span class="q ${q.cls}">${q.label}</span> · ${Math.round(dpi)} dpi`}</small>
+            <small>${slotSide(i)} · <span class="q ${q.cls}">${q.label}</span> · ${Math.round(dpi)} dpi</small>
           </div>
         </div>
         <div class="photo-actions">
-          ${pa('rotl', 'Turn left')}${pa('rotr', 'Turn right')}${pa('flip', 'Flip')}${pa('adjust', 'Crop')}
-          ${repeated ? pa('own', 'Change', 'replace') : pa('remove', 'Remove', 'remove', 'danger')}
+          ${pa('rotl', 'Turn left')}${pa('rotr', 'Turn right')}${pa('flip', 'Flip')}${pa('adjust', 'Crop')}${pa('remove', 'Remove', 'danger')}
         </div>`;
       row.addEventListener('click', (e) => {
         const b = e.target.closest('button');
@@ -264,10 +274,10 @@ function buildPhotoList() {
     }
   }
   listEl.replaceChildren(...rows);
-  $('#swapBtn').hidden = !(n === 2 && (photos[0] || photos[1]));
+  $('#swapBtn').hidden = !(photos[0] || photos[1]);
   drawThumbs();
 }
-const pa = (act, label, ic = act, cls = '') => `<button class="pa ${cls}" data-act="${act}" aria-label="${label}">${icon(ic)}<span>${label}</span></button>`;
+const pa = (act, label, cls = '') => `<button class="pa ${cls}" data-act="${act}" aria-label="${label}">${icon(act)}<span>${label}</span></button>`;
 function addRow(title, sub, i) {
   const b = document.createElement('button');
   b.className = 'add-row';
@@ -284,15 +294,14 @@ function drawThumbs() {
     const cv = row.querySelector('canvas');
     const card = layout.cards[i];
     if (!cv || !card) return;
-    const view = card.visible || card;
     const ctx = cv.getContext('2d');
-    const k = Math.min(cv.width / view.w, cv.height / view.h);
+    const k = Math.min(cv.width / card.w, cv.height / card.h);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#ECE8E1';
+    ctx.fillStyle = '#F1F0EE';
     ctx.fillRect(0, 0, cv.width, cv.height);
     renderSheet(ctx, { ...layout, cards: [card] }, [slots[i]], {
-      scale: k, origin: { x: view.x - (cv.width / k - view.w) / 2, y: view.y - (cv.height / k - view.h) / 2 },
-      color: frameColor(), font: state.font, marks: false, sourceFor: previewSource, keepBackground: true,
+      scale: k, origin: { x: card.x - (cv.width / k - card.w) / 2, y: card.y - (cv.height / k - card.h) / 2 },
+      color: frameColor(), marks: false, sourceFor: previewSource, keepBackground: true,
     });
   });
 }
@@ -302,16 +311,17 @@ function rotate(p, deg) {
   p.cx = 0.5; p.cy = 0.5;
 }
 function onTool(act, i) {
-  const p = renderSlots()[i]?.photo;
-  if (act === 'own' || act === 'replace') return pickFiles(i);
+  if (act === 'replace') return pickFiles(i);
+  const p = photos[i];
   if (!p) return;
   if (act === 'rotl') rotate(p, -90);
   else if (act === 'rotr') rotate(p, 90);
   else if (act === 'flip') rotate(p, 180);
   else if (act === 'adjust') return openAdjust(i);
-  else if (act === 'remove') { releasePhoto(photos[i]); photos[i] = null; if (selected === i) selected = null; }
+  else if (act === 'remove') { releasePhoto(p); photos[i] = null; if (selected === i) selected = null; }
   update();
 }
+$('#swapBtn').addEventListener('click', () => { [photos[0], photos[1]] = [photos[1], photos[0]]; update(); });
 
 /**
  * Drag to pan, wheel / pinch to zoom, in any element showing a photo window.
@@ -384,7 +394,7 @@ const adjCanvas = $('#adjustCanvas');
 let adjIndex = 0;
 let adjBackup = null;
 
-const adjPhoto = () => renderSlots()[adjIndex]?.photo;
+const adjPhoto = () => photos[adjIndex];
 function openAdjust(i) {
   adjIndex = i;
   const p = adjPhoto();
@@ -400,19 +410,17 @@ function drawAdjust() {
   if (!p) return;
   const layout = currentLayout();
   const card = layout.cards[adjIndex];
-  const view = card.visible || card; // what survives the borderless trim
   const box = $('#adjustStage').getBoundingClientRect();
   const maxW = Math.max(160, box.width - 32);
   const maxH = Math.max(200, (box.height || window.innerHeight * 0.6) - 32);
-  const cssScale = Math.min(maxW / view.w, Math.min(maxH, 640) / view.h);
+  const cssScale = Math.min(maxW / card.w, Math.min(maxH, 640) / card.h);
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  adjCanvas.style.width = `${view.w * cssScale}px`;
-  adjCanvas.style.height = `${view.h * cssScale}px`;
-  adjCanvas.width = Math.round(view.w * cssScale * dpr);
-  adjCanvas.height = Math.round(view.h * cssScale * dpr);
-  renderSheet(adjCanvas.getContext('2d'), { ...layout, cards: [card] }, [{ photo: p, caption: state.captions[adjIndex] }], {
-    scale: cssScale * dpr, origin: { x: view.x, y: view.y },
-    color: frameColor(), font: state.font, marks: false, sourceFor: previewSource,
+  adjCanvas.style.width = `${card.w * cssScale}px`;
+  adjCanvas.style.height = `${card.h * cssScale}px`;
+  adjCanvas.width = Math.round(card.w * cssScale * dpr);
+  adjCanvas.height = Math.round(card.h * cssScale * dpr);
+  renderSheet(adjCanvas.getContext('2d'), { ...layout, cards: [card] }, [renderSlots()[adjIndex]], {
+    scale: cssScale * dpr, origin: { x: card.x, y: card.y }, color: frameColor(), marks: false, sourceFor: previewSource,
   });
   $('#zoomRange').value = p.zoom;
   const { dpi, crop } = photoDpi(p, card.win);
@@ -421,7 +429,7 @@ function drawAdjust() {
 }
 attachPan(adjCanvas, adjPhoto, () => {
   const card = currentLayout().cards[adjIndex];
-  return adjCanvas.clientWidth * (card.win.w / (card.visible || card).w);
+  return adjCanvas.clientWidth * (card.win.w / card.w);
 }, () => currentLayout().cards[adjIndex].win, drawAdjust, () => {});
 $('#zoomRange').addEventListener('input', (e) => { adjPhoto().zoom = Number(e.target.value); drawAdjust(); });
 $$('[data-rot]', adjustDlg).forEach((b) => b.addEventListener('click', () => { rotate(adjPhoto(), Number(b.dataset.rot)); drawAdjust(); }));
@@ -432,66 +440,7 @@ adjustDlg.addEventListener('close', () => {
   update();
 });
 
-/* ---------------- advanced settings ---------------- */
-function bindSeg(id, get, set) {
-  const seg = $(id);
-  seg.addEventListener('click', (e) => {
-    const b = e.target.closest('button');
-    if (!b) return;
-    set(b.dataset.value);
-    update();
-  });
-  return () => $$('button', seg).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === get())));
-}
-const syncers = [
-  bindSeg('#layoutSeg', () => state.layout, (v) => { state.layout = v; selected = null; }),
-  bindSeg('#fontSeg', () => state.font, (v) => { state.font = v; }),
-  bindSeg('#paperSeg', () => state.paperId, (v) => { state.paperId = v; }),
-  bindSeg('#dpiSeg', () => state.dpiMode, (v) => { state.dpiMode = v; }),
-  bindSeg('#formatSeg', () => state.format, (v) => { state.format = v; }),
-];
-
-function buildFrameList() {
-  const list = $('#frameList');
-  const frames = { ...FRAMES[state.layout], custom: { label: 'Custom', detail: 'Set your own margins' } };
-  const paper = PAPERS[state.paperId];
-  list.replaceChildren(...Object.entries(frames).map(([id, f]) => {
-    const b = document.createElement('button');
-    b.className = 'option';
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-checked', String(state.frame[state.layout] === id));
-    const c = computeLayout({ layout: state.layout, frame: id, paperId: state.paperId, custom: state.custom[state.layout] }).cards[0];
-    const k = 34 / Math.max(paper.h, c.w * 0.9);
-    const win = `left:${(c.win.x - c.x) * k - 1}px;top:${(c.win.y - c.y) * k - 1}px;width:${c.win.w * k}px;height:${c.win.h * k}px`;
-    b.innerHTML = `<span class="option-glyph"><i style="width:${c.w * k}px;height:${c.h * k}px"><em style="${win}"></em></i></span>
-      <span><b>${f.label}</b><small>${f.detail}</small></span>`;
-    b.addEventListener('click', () => { state.frame[state.layout] = id; update(); });
-    return b;
-  }));
-  const isCustom = state.frame[state.layout] === 'custom';
-  $('#customFields').hidden = !isCustom;
-  if (isCustom) $$('[data-custom]').forEach((inp) => { if (document.activeElement !== inp) inp.value = state.custom[state.layout][inp.dataset.custom]; });
-}
-$$('[data-custom]').forEach((inp) => inp.addEventListener('input', () => {
-  const v = parseFloat(inp.value);
-  if (!Number.isFinite(v) || v < 0) return;
-  state.custom[state.layout][inp.dataset.custom] = v;
-  update();
-}));
-
-$('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.checked; update(); });
-$('#repeatToggle').addEventListener('change', (e) => { state.repeat = e.target.checked; update(); });
-$('#safeToggle').addEventListener('change', (e) => { $('#safeArea').hidden = !e.target.checked; });
-$('#resetBtn').addEventListener('click', () => {
-  Object.assign(state, structuredClone(defaults));
-  $('#safeToggle').checked = false;
-  $('#safeArea').hidden = true;
-  $$('#captions input').forEach((inp) => { inp.value = ''; });
-  update();
-  toast('Settings reset');
-});
-
-/* ---------------- primary controls ---------------- */
+/* ---------------- frame ---------------- */
 function buildSwatches() {
   $('#swatches').replaceChildren(...FRAME_COLORS.map((c) => {
     const b = document.createElement('button');
@@ -505,91 +454,290 @@ function buildSwatches() {
     return b;
   }));
 }
+$('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.checked; saveState(); drawPreview(); });
 
-function buildCaptions() {
-  const el = $('#captions');
-  const n = slotCount();
-  if (el.children.length === n) return;
-  el.replaceChildren(...Array.from({ length: n }, (_, i) => {
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.maxLength = 40;
-    inp.enterKeyHint = 'done';
-    inp.placeholder = n === 1 ? 'Write on the frame' : `Photo ${i + 1} caption`;
-    inp.value = state.captions[i] || '';
-    inp.addEventListener('input', () => { state.captions[i] = inp.value; saveState(); loadCaptionFont(); drawPreview(); });
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
-    return inp;
+/* ---------------- captions: templates ---------------- */
+function allTemplates() {
+  return [
+    ...BUILTIN_TEMPLATES.map((t) => ({ id: t.id, name: t.name, layers: t.layers })),
+    ...templates.map((t) => ({ ...t, layers: () => t.layers })),
+  ];
+}
+function applyTemplate(t) {
+  state.layers = cloneLayers(t.layers());
+  state.templateId = t.id;
+  saveState();
+  buildTemplateChips();
+  buildLayerList();
+  loadFonts(fontsInUse()).then(drawPreview);
+  drawPreview();
+}
+function buildTemplateChips() {
+  $('#templateChips').replaceChildren(...allTemplates().map((t) => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.setAttribute('role', 'listitem');
+    b.setAttribute('aria-pressed', String(state.templateId === t.id));
+    b.textContent = t.name;
+    b.addEventListener('click', () => applyTemplate(t));
+    return b;
   }));
 }
-function loadCaptionFont() {
-  const f = FONTS[state.font];
-  if (state.captions.some(Boolean)) document.fonts?.load(`${f.weight} 40px ${f.css}`).then(drawPreview, () => {});
+function buildTemplateManager() {
+  const list = $('#tplList');
+  if (!templates.length) { list.innerHTML = '<p class="empty-note">No saved templates yet.</p>'; return; }
+  list.replaceChildren(...templates.map((t) => {
+    const row = document.createElement('div');
+    row.className = 'tpl-row';
+    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.layers.length} caption${t.layers.length === 1 ? '' : 's'}</small></span>
+      <button class="apply">Use</button><button class="del" aria-label="Delete ${escapeHtml(t.name)}">Delete</button>`;
+    row.querySelector('.apply').addEventListener('click', () => { applyTemplate({ ...t, layers: () => t.layers }); $('#templatesDlg').close(); });
+    row.querySelector('.del').addEventListener('click', () => {
+      templates = templates.filter((x) => x.id !== t.id);
+      if (state.templateId === t.id) state.templateId = null;
+      saveTemplates(); saveState();
+      buildTemplateManager(); buildTemplateChips();
+    });
+    return row;
+  }));
+}
+$('[data-open="templatesDlg"]').addEventListener('click', buildTemplateManager);
+$('#tplForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('#tplName').value.trim();
+  if (!name) return;
+  const existing = templates.find((t) => t.name.toLowerCase() === name.toLowerCase());
+  const tpl = { id: existing?.id || `u${Date.now().toString(36)}`, name, layers: cloneLayers(state.layers) };
+  templates = existing ? templates.map((t) => (t.id === tpl.id ? tpl : t)) : [...templates, tpl];
+  state.templateId = tpl.id;
+  saveTemplates(); saveState();
+  $('#tplName').value = '';
+  buildTemplateManager(); buildTemplateChips();
+  toast(existing ? `Updated “${name}”` : `Saved “${name}”`);
+});
+
+/* ---------------- captions: layers on the main screen ---------------- */
+function describe(l) {
+  const where = { bottom: 'Bottom', top: 'Top', left: 'Left side', right: 'Right side' }[l.edge];
+  const align = { start: 'start', center: 'centre', end: 'end' }[l.align];
+  return `${where} · ${align}`;
+}
+function buildLayerList() {
+  const list = $('#layerList');
+  if (!state.layers.length) {
+    list.innerHTML = '<p class="empty-note">No captions. Pick a template or add one.</p>';
+    return;
+  }
+  list.replaceChildren(...state.layers.map((l) => {
+    const row = document.createElement('div');
+    row.className = 'layer-row';
+    const sample = (DATE_FORMATS[l.dateFormat] || DATE_FORMATS.dots).fmt(photos[0]?.date || today);
+    row.innerHTML = `
+      <span class="layer-icon">${icon(l.kind === 'date' ? 'date' : 'text')}</span>
+      <div class="layer-main">
+        ${l.kind === 'date'
+          ? `<b>Date</b><small>${sample} · ${describe(l)}</small>`
+          : l.same
+            ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
+            : `<input type="text" maxlength="60" placeholder="Photo 1 caption" aria-label="Photo 1 caption" data-t="0" value="${escapeHtml(l.texts[0])}">
+               <input type="text" maxlength="60" placeholder="Photo 2 caption" aria-label="Photo 2 caption" data-t="1" value="${escapeHtml(l.texts[1])}">`}
+      </div>
+      <button class="font-chip" style="font-family:${escapeHtml(fontCss(l.font))}" aria-label="Font: ${escapeHtml(l.font)}">${escapeHtml(l.font)}</button>
+      <button class="edit-btn" aria-label="Caption options">${icon('more')}</button>`;
+    $$('input', row).forEach((inp) => {
+      inp.enterKeyHint = 'done';
+      inp.addEventListener('input', () => {
+        if (inp.dataset.t === 'all') l.text = inp.value; else l.texts[Number(inp.dataset.t)] = inp.value;
+        captionsChanged();
+      });
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    });
+    row.querySelector('.font-chip').addEventListener('click', () => openFontPicker(l.id));
+    row.querySelector('.edit-btn').addEventListener('click', () => openLayer(l.id));
+    if (l.kind === 'date') row.querySelector('.layer-main').addEventListener('click', () => openLayer(l.id));
+    return row;
+  }));
+}
+$('#addText').addEventListener('click', () => {
+  state.layers.push(textLayer());
+  captionsChanged({ rebuildList: true });
+  $('#layerList .layer-row:last-child input')?.focus();
+});
+$('#addDate').addEventListener('click', () => {
+  state.layers.push(dateLayer());
+  captionsChanged({ rebuildList: true });
+});
+
+/* ---------------- captions: style sheet ---------------- */
+const layerDlg = $('#layerDlg');
+let editId = null;
+
+function openLayer(id) {
+  editId = id;
+  fillLayerDialog();
+  layerDlg.showModal();
+}
+function fillLayerDialog() {
+  const l = layerById(editId);
+  if (!l) return;
+  $('#layerTitle').textContent = l.kind === 'date' ? 'Date caption' : 'Text caption';
+  $('#layerTextBlock').hidden = l.kind !== 'text';
+  $('#layerDateBlock').hidden = l.kind !== 'date';
+  if (l.kind === 'text') {
+    $('#layerSame').checked = !!l.same;
+    const fields = l.same
+      ? [['all', 'Both photos', l.text]]
+      : [['0', 'Photo 1', l.texts[0]], ['1', 'Photo 2', l.texts[1]]];
+    $('#layerTexts').innerHTML = fields.map(([k, label, v]) =>
+      `<label>${label}<input type="text" maxlength="60" data-t="${k}" value="${escapeHtml(v || '')}" enterkeyhint="done"></label>`).join('');
+    $$('#layerTexts input').forEach((inp) => inp.addEventListener('input', () => {
+      if (inp.dataset.t === 'all') l.text = inp.value; else l.texts[Number(inp.dataset.t)] = inp.value;
+      captionsChanged({ rebuildList: true });
+    }));
+  } else {
+    const d = photos[0]?.date || today;
+    $('#dateFormats').replaceChildren(...Object.entries(DATE_FORMATS).map(([k, f]) => {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.setAttribute('aria-checked', String(l.dateFormat === k));
+      b.textContent = f.fmt(d);
+      b.addEventListener('click', () => { l.dateFormat = k; captionsChanged({ rebuildList: true }); fillLayerDialog(); });
+      return b;
+    }));
+  }
+  $('#layerFontName').textContent = l.font;
+  $('#layerFontName').style.fontFamily = fontCss(l.font);
+  $('#layerSize').value = l.size;
+  $('#layerSizeVal').textContent = `${l.size.toFixed(1)} mm`;
+  $('#layerColors').replaceChildren(...CAPTION_COLORS.map((c) => {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-label', c.label);
+    b.title = c.label;
+    b.setAttribute('aria-checked', String(l.color === c.id));
+    if (c.value) b.style.background = c.value; else { b.textContent = 'A'; b.style.background = frameColor().fill; b.style.color = frameColor().ink; }
+    b.addEventListener('click', () => { l.color = c.id; captionsChanged(); fillLayerDialog(); });
+    return b;
+  }));
+  $$('#layerEdge button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === l.edge)));
+  $$('#layerAlign button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === l.align)));
+}
+$('#layerSame').addEventListener('change', (e) => {
+  const l = layerById(editId);
+  if (e.target.checked) l.text = l.text || l.texts.find(Boolean) || '';
+  else l.texts = [l.texts[0] || l.text || '', l.texts[1] || l.text || ''];
+  l.same = e.target.checked;
+  captionsChanged({ rebuildList: true });
+  fillLayerDialog();
+});
+$('#layerSize').addEventListener('input', (e) => {
+  const l = layerById(editId);
+  l.size = Number(e.target.value);
+  $('#layerSizeVal').textContent = `${l.size.toFixed(1)} mm`;
+  captionsChanged();
+});
+for (const [id, key] of [['#layerEdge', 'edge'], ['#layerAlign', 'align']]) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    layerById(editId)[key] = b.dataset.value;
+    captionsChanged({ rebuildList: true });
+    fillLayerDialog();
+  });
+}
+$('#layerFontBtn').addEventListener('click', () => openFontPicker(editId));
+$('#layerDelete').addEventListener('click', () => {
+  state.layers = state.layers.filter((l) => l.id !== editId);
+  layerDlg.close();
+  captionsChanged({ rebuildList: true });
+});
+
+/* ---------------- captions: font picker ---------------- */
+const fontDlg = $('#fontDlg');
+let fontTarget = null;
+let fontGroup = FONT_GROUPS[0].id;
+
+function openFontPicker(layerId) {
+  fontTarget = layerId;
+  const current = layerById(layerId)?.font;
+  fontGroup = FONT_GROUPS.find((g) => g.fonts.includes(current))?.id || FONT_GROUPS[0].id;
+  buildFontPicker();
+  fontDlg.showModal();
+}
+function buildFontPicker() {
+  const l = layerById(fontTarget);
+  $('#fontGroups').replaceChildren(...FONT_GROUPS.map((g) => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(g.id === fontGroup));
+    b.setAttribute('aria-pressed', String(g.id === fontGroup));
+    b.textContent = g.label;
+    b.addEventListener('click', () => { fontGroup = g.id; buildFontPicker(); });
+    return b;
+  }));
+  const group = FONT_GROUPS.find((g) => g.id === fontGroup);
+  const sample = l?.kind === 'text'
+    ? (l.same ? l.text : l.texts.find(Boolean)) || 'Summer days'
+    : (DATE_FORMATS[l?.dateFormat] || DATE_FORMATS.dots).fmt(photos[0]?.date || today);
+  $('#fontList').replaceChildren(...group.fonts.map((f) => {
+    const b = document.createElement('button');
+    b.className = 'font-row';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(l?.font === f));
+    b.innerHTML = `<span><span class="sample" style="font-family:${escapeHtml(fontCss(f))}">${escapeHtml(sample)}</span><small>${f}</small></span><span class="check">${icon('check')}</span>`;
+    b.addEventListener('click', () => {
+      const layer = layerById(fontTarget);
+      if (!layer) return;
+      layer.font = f;
+      captionsChanged({ rebuildList: true });
+      buildFontPicker();
+      if (layerDlg.open) fillLayerDialog();
+    });
+    return b;
+  }));
+  loadFonts(group.fonts);
 }
 
-$('#swapBtn').addEventListener('click', () => { [photos[0], photos[1]] = [photos[1], photos[0]]; update(); });
-
-function outputPlan() {
-  const layout = currentLayout();
-  const slots = renderSlots();
-  const dpis = slots.map((s, i) => (s.photo ? photoDpi(s.photo, layout.cards[i].win).dpi : 0)).filter(Boolean);
-  const dpi = chooseDpi(state.dpiMode, dpis, layout.paper, MAX_PIXELS);
-  return { layout, slots, dpi, px: sheetPixels(layout.paper, dpi), minPhotoDpi: dpis.length ? Math.min(...dpis) : null };
+/* ---------------- paper ---------------- */
+function buildPaperList() {
+  $('#paperValue').textContent = state.paperId;
+  $('#paperList').replaceChildren(...Object.values(PAPERS).map((p) => {
+    const b = document.createElement('button');
+    b.className = 'paper-row';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(state.paperId === p.id));
+    b.innerHTML = `<span><b>${p.id}</b><small>${p.kind} · ${p.note}</small></span><span class="check">${icon('check')}</span>`;
+    b.addEventListener('click', () => { state.paperId = p.id; update(); });
+    return b;
+  }));
 }
 
 /* ---------------- master update ---------------- */
 function update() {
   saveState();
-  const layout = currentLayout();
-  const { paper } = layout;
+  const { paper } = currentLayout();
   sheetEl.style.setProperty('--ar', String(paper.w / paper.h));
-  Object.assign($('#safeArea').style, {
-    left: `${(OVERSCAN_MM / paper.w) * 100}%`, right: `${(OVERSCAN_MM / paper.w) * 100}%`,
-    top: `${(OVERSCAN_MM / paper.h) * 100}%`, bottom: `${(OVERSCAN_MM / paper.h) * 100}%`,
-  });
-  syncers.forEach((s) => s());
   $('#marksToggle').checked = state.marks;
-  $('#repeatToggle').checked = state.repeat;
-  $('#repeatRow').hidden = slotCount() !== 2;
-  buildFrameList();
+  $('#sheetMeta').textContent = `${paper.id} · ${paper.kind} · cut down the middle`;
   buildSwatches();
-  buildCaptions();
-
-  const fw = $('#fitWarn');
-  fw.hidden = layout.fits;
-  if (!layout.fits) fw.textContent = `This frame is ${layout.overflow} mm too big for its half of the sheet.`;
-
-  const frameLabel = state.frame[state.layout] === 'custom' ? 'Custom' : FRAMES[state.layout][state.frame[state.layout]].label;
-  const sizeTxt = `${fmt(paper.w)} × ${fmt(paper.h)} mm`;
-  $('#sheetMeta').textContent = state.layout === 'wide'
-    ? `${sizeTxt} · Instax Wide`
-    : `${sizeTxt} · ${frameLabel}${state.frame.mini === 'half' ? ' · cut down the middle' : ''}`;
-  $('#advSummary').textContent = [
-    state.layout === 'wide' ? 'One Wide' : 'Two Minis', frameLabel,
-    state.paperId === 'postcard' ? 'Postcard' : '4×6 in',
-    state.marks ? 'Cut guides' : 'No guides',
-  ].join(' · ');
-
-  const plan = outputPlan();
-  const hasPhoto = plan.slots.some((s) => s.photo);
-  $('#exportBtn').disabled = !hasPhoto;
-  $('#outInfo').textContent = hasPhoto
-    ? `${state.dpiMode === 'auto' ? 'Auto: ' : ''}${plan.dpi} dpi · ${plan.px.w} × ${plan.px.h} px. The SELPHY prints at 300 dpi.`
-    : 'Auto keeps every pixel of your sharpest photo (300–1200 dpi). The SELPHY prints at 300 dpi.';
-
+  buildPaperList();
+  buildTemplateChips();
+  buildLayerList();
+  $('#exportBtn').disabled = !(photos[0] || photos[1]);
   buildSlots();
   buildPhotoList();
   drawPreview();
-  loadCaptionFont();
+  loadFonts(fontsInUse()).then(drawPreview);
 }
-const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-/* ---------------- export ---------------- */
+/* ---------------- export: highest-resolution JPEG ---------------- */
 const exportDlg = $('#exportDlg');
 let exportUrl = null;
 
 async function exportSheet() {
-  const plan = outputPlan();
+  const layout = currentLayout();
+  const slots = renderSlots();
   const preview = $('#exportPreview');
   const dl = $('#downloadLink');
   const share = $('#shareBtn');
@@ -598,35 +746,33 @@ async function exportSheet() {
   share.hidden = true;
   $('#exportStats').textContent = 'Rendering at full resolution…';
   exportDlg.showModal();
-  await document.fonts.load(`${FONTS[state.font].weight} 40px ${FONTS[state.font].css}`).catch(() => {});
+  await loadFonts(fontsInUse());
   await new Promise((r) => setTimeout(r, 30));
 
   // Empty frames are left off the print entirely.
-  const keep = plan.slots.map((s) => !!s.photo);
-  const layout = { ...plan.layout, cards: plan.layout.cards.filter((_, i) => keep[i]) };
-  const slots = plan.slots.filter((_, i) => keep[i]);
+  const keep = slots.map((s) => !!s.photo);
+  const sheet = { ...layout, cards: layout.cards.filter((_, i) => keep[i]) };
+  const used = slots.filter((_, i) => keep[i]);
+  const dpis = used.map((s, k) => photoDpi(s.photo, sheet.cards[k].win).dpi);
 
-  let dpi = plan.dpi, blob = null;
-  for (let attempt = 0; attempt < 4 && !blob; attempt++) {
+  let dpi = chooseDpi(dpis, layout.paper, MAX_PIXELS), blob = null;
+  for (let attempt = 0; attempt < 5 && !blob; attempt++) {
     const px = sheetPixels(layout.paper, dpi);
     const cv = document.createElement('canvas');
     cv.width = px.w; cv.height = px.h;
     const ctx = cv.getContext('2d');
     if (ctx) {
-      renderSheet(ctx, layout, slots, { scale: dpi / MM_PER_INCH, color: frameColor(), font: state.font, marks: state.marks, sourceFor: fullSource });
-      blob = await new Promise((r) => cv.toBlob(r, state.format === 'jpeg' ? 'image/jpeg' : 'image/png', 0.97));
+      renderSheet(ctx, sheet, used, { scale: dpi / MM_PER_INCH, color: frameColor(), marks: state.marks, sourceFor: fullSource });
+      blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 1));
     }
     cv.width = cv.height = 0;
-    if (!blob) { dpi = Math.max(300, Math.floor(dpi * 0.75)); toast(`Not enough memory, retrying at ${dpi} dpi`); }
+    if (!blob) dpi = Math.max(300, Math.floor(dpi * 0.8)); // out of memory: step down and retry
   }
-  if (!blob) { exportDlg.close(); return toast('Export failed on this device. Try 300 dpi in Advanced.'); }
+  if (!blob) { exportDlg.close(); return toast('Export failed on this device.'); }
 
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const stamped = state.format === 'jpeg' ? setJpegDpi(bytes, dpi) : setPngDpi(bytes, dpi);
-  const type = state.format === 'jpeg' ? 'image/jpeg' : 'image/png';
-  const ext = state.format === 'jpeg' ? 'jpg' : 'png';
-  const name = `twinmini-${layout.paper.w}x${layout.paper.h}mm-${dpi}dpi.${ext}`;
-  const file = new File([stamped], name, { type });
+  const bytes = setJpegDpi(new Uint8Array(await blob.arrayBuffer()), dpi);
+  const name = `twinmini-${layout.paper.id}-${dpi}dpi.jpg`;
+  const file = new File([bytes], name, { type: 'image/jpeg' });
   if (exportUrl) URL.revokeObjectURL(exportUrl);
   exportUrl = URL.createObjectURL(file);
 
@@ -635,8 +781,7 @@ async function exportSheet() {
   dl.href = exportUrl;
   dl.download = name;
   dl.removeAttribute('aria-disabled');
-  dl.textContent = `Download ${ext.toUpperCase()}`;
-  $('#exportStats').textContent = `${px.w} × ${px.h} px · ${dpi} dpi · ${(file.size / 1e6).toFixed(1)} MB`;
+  $('#exportStats').textContent = `${layout.paper.id} · ${px.w} × ${px.h} px · ${dpi} dpi · ${(file.size / 1e6).toFixed(1)} MB`;
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   share.hidden = !canShare;
   dl.classList.toggle('secondary', canShare);
@@ -653,7 +798,7 @@ const fileInput = $('#fileInput');
 let pickTarget = null;
 function pickFiles(i) {
   pickTarget = i;
-  fileInput.multiple = i == null || (slotCount() === 2 && !photos[0] && !photos[1]);
+  fileInput.multiple = i == null || (!photos[0] && !photos[1]);
   fileInput.click();
 }
 fileInput.addEventListener('change', () => {
@@ -675,6 +820,10 @@ window.addEventListener('paste', (e) => {
   const files = [...(e.clipboardData?.files || [])];
   if (files.length) placeFiles(files, null);
 });
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 let toastT;
 function toast(msg) {
