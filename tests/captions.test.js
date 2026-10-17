@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readExifDate, parseExifDate } from '../app/src/exif.js';
-import { BUILTIN_TEMPLATES, DATE_FORMATS, defaultLayers, resolveLayers, sanitizeLayers, textLayer, cloneLayers } from '../app/src/captions.js';
 
 /** Build a minimal big- or little-endian JPEG with Exif DateTimeOriginal. */
 function jpegWithDate(s, le = false) {
@@ -32,56 +31,89 @@ test('non-JPEG or missing EXIF gives null', () => {
   assert.equal(parseExifDate('0000:00:00 00:00:00'), null);
 });
 
-test('date formats', () => {
-  const d = new Date(2026, 9, 7);
-  assert.equal(DATE_FORMATS.dots.fmt(d), '2026.10.07');
-  assert.equal(DATE_FORMATS.stamp.fmt(d), "'26 10 07");
-  assert.equal(DATE_FORMATS.dmy.fmt(d), '7 Oct 2026');
-  assert.equal(DATE_FORMATS.mdy.fmt(d), 'Oct 7, 2026');
+import {
+  formatDate, defaultDateFormat, DATE_OPTIONS, dateSettings, textLayer, resolveCaptions, sanitizeLayers,
+  migrateDate, cloneLayers, BUILTIN_TEMPLATES, exportTemplatesText, parseTemplatesText, SHIFT,
+} from '../app/src/captions.js';
+
+const D = new Date(2026, 9, 7, 16, 5, 9); // Wed 7 Oct 2026, 16:05:09
+const fmt = (o) => formatDate(D, { ...defaultDateFormat(), ...o });
+
+test('date format is composed from independent options', () => {
+  assert.equal(fmt({}), '2026.10.07');
+  assert.equal(fmt({ order: 'dmy', sep: '/' }), '07/10/2026');
+  assert.equal(fmt({ order: 'mdy', sep: '-' }), '10-07-2026');
+  assert.equal(fmt({ year: 'short', sep: ' ' }), "'26 10 07");
+  assert.equal(fmt({ year: 'none' }), '10.07');
+  assert.equal(fmt({ order: 'dmy', month: 'short' }), '7 Oct 2026');
+  assert.equal(fmt({ order: 'mdy', month: 'long' }), 'October 7, 2026');
+  assert.equal(fmt({ order: 'mdy', month: 'short', year: 'none' }), 'Oct 7');
+  assert.equal(fmt({ order: 'ymd', month: 'short' }), '2026 Oct 7');
+  assert.equal(fmt({ weekday: 'short' }), 'Wed, 2026.10.07');
+  assert.equal(fmt({ order: 'dmy', month: 'long', weekday: 'long' }), 'Wednesday, 7 October 2026');
 });
 
-test('default captions are a single date caption', () => {
-  const layers = defaultLayers();
-  assert.equal(layers.length, 1);
-  assert.equal(layers[0].kind, 'date');
+test('date & time: 24 h or 12 h AM/PM, seconds optional', () => {
+  assert.equal(fmt({ show: 'datetime' }), '2026.10.07  16:05');
+  assert.equal(fmt({ show: 'datetime', clock: '12' }), '2026.10.07  4:05 PM');
+  assert.equal(fmt({ show: 'datetime', seconds: true }), '2026.10.07  16:05:09');
+  assert.equal(formatDate(new Date(2026, 0, 1, 0, 7), { show: 'datetime', clock: '12' }), '2026.01.01  12:07 AM');
+  assert.deepEqual(DATE_OPTIONS.show, ['date', 'datetime']);
+});
+
+test('one date per print, independent of text captions; photo time by default, or now', () => {
+  const photo = new Date(2020, 1, 3, 8, 0), now = new Date(2026, 9, 17, 21, 30);
+  const notes = [textLayer({ texts: ['beach', 'us'] })];
+  const d = dateSettings();
+  assert.equal(d.on, true);
+  assert.equal(d.source, 'photo');
+  assert.deepEqual(resolveCaptions(notes, d, 0, photo, now).map((l) => l.text), ['beach', '2020.02.03']);
+  assert.deepEqual(resolveCaptions(notes, { ...d, source: 'now' }, 1, photo, now).map((l) => l.text), ['us', '2026.10.17']);
+  assert.deepEqual(resolveCaptions(notes, { ...d, on: false }, 0, photo, now).map((l) => l.text), ['beach']);
+  assert.deepEqual(resolveCaptions([], d, 0, photo, now).map((l) => l.text), ['2020.02.03']);
+});
+
+test('text captions only; date layers from older saves become the single date setting', () => {
+  const legacy = [{ kind: 'text', texts: ['a', 'b'] }, { kind: 'date', dateFormat: 'dmy-t12', edge: 'right', size: 3 }, { kind: 'date', dateFormat: 'dots' }];
+  assert.equal(sanitizeLayers(legacy).length, 1);
+  const d = migrateDate(undefined, legacy);
+  assert.equal(d.on, true);
+  assert.equal(d.edge, 'right');
+  assert.deepEqual([d.fmt.show, d.fmt.order, d.fmt.month, d.fmt.clock], ['datetime', 'dmy', 'short', '12']);
+  assert.equal(migrateDate(undefined, [{ kind: 'text' }]), null);
+  const bad = migrateDate({ on: true, fmt: { order: 'xyz', clock: '25' }, shift: 99 });
+  assert.equal(bad.fmt.order, 'ymd');
+  assert.equal(bad.fmt.clock, '24');
+  assert.equal(bad.shift, SHIFT.max);
+});
+
+test('built-in templates: Date first; each has captions and a date setting', () => {
   assert.equal(BUILTIN_TEMPLATES[0].name, 'Date');
+  for (const t of BUILTIN_TEMPLATES) {
+    assert.ok(Array.isArray(t.captions()));
+    assert.equal(t.date().kind, 'date');
+  }
+  assert.equal(BUILTIN_TEMPLATES.find((t) => t.name === 'None').date().on, false);
 });
 
-test('resolveLayers: per-photo text, shared text, date per photo, empties dropped', () => {
-  const per = textLayer({ texts: ['beach', ''] });
-  const shared = textLayer({ same: true, text: 'us' });
-  const [date] = defaultLayers();
-  const d1 = new Date(2024, 0, 2), d2 = new Date(2025, 5, 6);
-  const a = resolveLayers([per, shared, date], 0, d1).map((l) => l.text);
-  const b = resolveLayers([per, shared, date], 1, d2).map((l) => l.text);
-  assert.deepEqual(a, ['beach', 'us', '2024.01.02']);
-  assert.deepEqual(b, ['us', '2025.06.06']);
-});
-
-test('sanitizeLayers repairs stored data; cloneLayers gives fresh ids', () => {
-  const s = sanitizeLayers([{ kind: 'date', edge: 'diagonal', size: 99 }, { kind: 'bogus' }, null]);
-  assert.equal(s.length, 1);
-  assert.equal(s[0].edge, 'bottom');
-  assert.equal(s[0].size, 14);
-  assert.equal(sanitizeLayers('nope'), null);
-  const c = cloneLayers(s);
-  assert.notEqual(c[0].id, s[0].id);
-});
-
-import { exportTemplatesText, parseTemplatesText, dateLayer as dl, textLayer as tl } from '../app/src/captions.js';
-
-test('template text round-trips through export and import', () => {
-  const layers = [tl({ texts: ['a', 'b'], font: 'Pacifico', edge: 'top' }), dl({ dateFormat: 'stamp', color: 'stamp' })];
-  const one = exportTemplatesText([{ name: 'Retro', layers }]);
-  assert.match(one, /"twinmini": "caption-template"/);
-  const [back] = parseTemplatesText(one);
+test('template text round-trips captions and the date', () => {
+  const layers = [textLayer({ texts: ['a', 'b'], font: 'Pacifico', edge: 'top', shift: -6.5 })];
+  const date = dateSettings({ source: 'now', color: 'stamp', fmt: { show: 'datetime', clock: '12', weekday: 'short' } });
+  const text = exportTemplatesText([{ name: 'Retro', layers, date }]);
+  assert.match(text, /"twinmini": "caption-template"/);
+  const [back] = parseTemplatesText(text);
   assert.equal(back.name, 'Retro');
-  assert.deepEqual(back.layers.map((l) => [l.kind, l.font, l.edge, l.dateFormat ?? null]), [['text', 'Pacifico', 'top', null], ['date', 'Caveat', 'bottom', 'stamp']]);
   assert.deepEqual(back.layers[0].texts, ['a', 'b']);
-  assert.ok(!('texts' in JSON.parse(one).captions[1]), 'date captions carry no text fields');
-  const many = exportTemplatesText([{ name: 'A', layers }, { name: 'B', layers: [] }]);
-  assert.deepEqual(parseTemplatesText(many).map((t) => t.name), ['A', 'B']);
-  assert.deepEqual(parseTemplatesText(JSON.stringify({ templates: JSON.parse(many) })).map((t) => t.name), ['A', 'B']);
+  assert.equal(back.layers[0].shift, -6.5);
+  assert.equal(back.date.source, 'now');
+  assert.deepEqual([back.date.fmt.show, back.date.fmt.clock, back.date.fmt.weekday], ['datetime', '12', 'short']);
+  const many = exportTemplatesText([{ name: 'A', layers, date }, { name: 'B', layers: [], date: { ...date, on: false } }]);
+  assert.deepEqual(parseTemplatesText(many).map((t) => [t.name, t.date.on]), [['A', true], ['B', false]]);
+  // version-1 text (date as a caption) still imports
+  const v1 = '{"twinmini":"caption-template","version":1,"name":"Old","captions":[{"kind":"date","dateFormat":"stamp","color":"stamp"}]}';
+  const [old] = parseTemplatesText(v1);
+  assert.equal(old.layers.length, 0);
+  assert.equal(formatDate(D, old.date.fmt), "'26 10 07");
 });
 
 test('import rejects junk with a readable message', () => {
@@ -89,48 +121,7 @@ test('import rejects junk with a readable message', () => {
   assert.throws(() => parseTemplatesText('{"name":"x"}'), /captions/);
 });
 
-import { DATE_FORMATS as F, FORMAT_GROUPS, groupLabel, resolveLayers as resolve, dateLayer as mkDate, sanitizeLayers as clean, exportTemplatesText as exp, parseTemplatesText as imp } from '../app/src/captions.js';
-
-test('date, time and date-and-time formats', () => {
-  const d = new Date(2026, 9, 7, 16, 5, 9);
-  const f = (id) => F[id].fmt(d);
-  assert.equal(f('iso'), '2026-10-07');
-  assert.equal(f('us'), '10/07/2026');
-  assert.equal(f('weekday'), 'Wed, 7 Oct');
-  assert.equal(f('long'), 'Wednesday, 7 October 2026');
-  assert.equal(f('t24'), '16:05');
-  assert.equal(f('t12'), '4:05 PM');
-  assert.equal(f('t24s'), '16:05:09');
-  assert.equal(f('dots-t24'), '2026.10.07 16:05');
-  assert.equal(f('dmy-t12'), '7 Oct 2026, 4:05 PM');
-  assert.equal(F.t12.fmt(new Date(2026, 0, 1, 0, 7)), '12:07 AM');
-  assert.deepEqual(FORMAT_GROUPS.map((g) => g.id), ['date', 'time', 'datetime']);
-  for (const k of Object.keys(F)) assert.ok(['date', 'time', 'datetime'].includes(F[k].group), k);
-  assert.equal(groupLabel('t24'), 'Time');
-  assert.equal(groupLabel('nope'), 'Date');
-});
-
-test('timestamp source: photo by default, or now', () => {
-  const photo = new Date(2020, 1, 3, 8, 0), now = new Date(2026, 9, 17, 21, 30);
-  assert.equal(mkDate().source, 'photo');
-  assert.equal(resolve([mkDate({ dateFormat: 'dots-t24' })], 0, photo, now)[0].text, '2020.02.03 08:00');
-  assert.equal(resolve([mkDate({ dateFormat: 'dots-t24', source: 'now' })], 0, photo, now)[0].text, '2026.10.17 21:30');
-});
-
-test('stored date captions are repaired and keep their source through template text', () => {
-  const [a] = clean([{ kind: 'date', dateFormat: 'bogus', source: 'tomorrow' }]);
-  assert.equal(a.dateFormat, 'dots');
-  assert.equal(a.source, 'photo');
-  const [t] = imp(exp([{ name: 'N', layers: [mkDate({ dateFormat: 't12', source: 'now' })] }]));
-  assert.equal(t.layers[0].dateFormat, 't12');
-  assert.equal(t.layers[0].source, 'now');
-});
-
-import { SHIFT, sanitizeLayers as san2, textLayer as tl2, exportTemplatesText as ex2, parseTemplatesText as im2 } from '../app/src/captions.js';
-
-test('caption distance: defaults to centred, clamped, survives template text', () => {
-  assert.equal(tl2().shift, 0);
-  assert.equal(san2([{ kind: 'text', shift: -99 }])[0].shift, SHIFT.min);
-  const [t] = im2(ex2([{ name: 'S', layers: [tl2({ shift: -6.5 })] }]));
-  assert.equal(t.layers[0].shift, -6.5);
+test('cloneLayers gives fresh ids', () => {
+  const [a] = [textLayer()];
+  assert.notEqual(cloneLayers([a])[0].id, a.id);
 });
