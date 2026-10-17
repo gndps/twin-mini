@@ -99,10 +99,19 @@
             <button class="text-btn" data-open="templatesDlg">Templates</button>
           </div>
           <div class="chips" id="templateChips" role="list" aria-label="Caption templates"></div>
+          <div class="card date-card">
+            <div class="list-row">
+              <button class="date-open" id="dateEdit">
+                <span class="layer-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12" rx="2"/><path d="M3 8.5h14M7 3v3M13 3v3"/></svg></span>
+                <span class="date-text"><b>Date</b><small id="dateSummary"></small></span>
+                <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+              </button>
+              <span class="switch"><input type="checkbox" id="dateToggle" aria-label="Show the date"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+            </div>
+          </div>
           <div class="card" id="layerList"></div>
           <div class="add-pair">
-            <button class="text-btn" id="addText"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Text</button>
-            <button class="text-btn" id="addDate"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Date / time</button>
+            <button class="text-btn" id="addText"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Caption</button>
           </div>
         </section>
 
@@ -183,14 +192,71 @@
           <div class="text-fields" id="layerTexts"></div>
         </div>
         <div id="layerDateBlock">
+          <p class="date-preview" id="datePreview"></p>
           <div class="card">
             <div class="list-row stacked">
               <span>Show</span>
-              <div class="seg" role="radiogroup" aria-label="Show" id="dtGroup"></div>
-              <div class="chips wrap" id="dateFormats" role="radiogroup" aria-label="Format"></div>
+              <div class="seg" role="radiogroup" aria-label="Show" data-opt="show">
+                <button role="radio" data-value="date">Date</button>
+                <button role="radio" data-value="datetime">Date &amp; time</button>
+              </div>
             </div>
             <div class="list-row stacked">
-              <span>Timestamp</span>
+              <span>Order</span>
+              <div class="seg" role="radiogroup" aria-label="Order" data-opt="order">
+                <button role="radio" data-value="ymd">Y · M · D</button>
+                <button role="radio" data-value="dmy">D · M · Y</button>
+                <button role="radio" data-value="mdy">M · D · Y</button>
+              </div>
+            </div>
+            <div class="list-row stacked">
+              <span>Month</span>
+              <div class="seg" role="radiogroup" aria-label="Month" data-opt="month">
+                <button role="radio" data-value="num">10</button>
+                <button role="radio" data-value="short">Oct</button>
+                <button role="radio" data-value="long">October</button>
+              </div>
+            </div>
+            <div class="list-row stacked">
+              <span>Year</span>
+              <div class="seg" role="radiogroup" aria-label="Year" data-opt="year">
+                <button role="radio" data-value="full">2026</button>
+                <button role="radio" data-value="short">’26</button>
+                <button role="radio" data-value="none">None</button>
+              </div>
+            </div>
+            <div class="list-row stacked" id="sepRow">
+              <span>Separator</span>
+              <div class="seg" role="radiogroup" aria-label="Separator" data-opt="sep">
+                <button role="radio" data-value=".">.</button>
+                <button role="radio" data-value="/">/</button>
+                <button role="radio" data-value="-">–</button>
+                <button role="radio" data-value=" ">Space</button>
+              </div>
+            </div>
+            <div class="list-row stacked">
+              <span>Weekday</span>
+              <div class="seg" role="radiogroup" aria-label="Weekday" data-opt="weekday">
+                <button role="radio" data-value="none">None</button>
+                <button role="radio" data-value="short">Sat</button>
+                <button role="radio" data-value="long">Saturday</button>
+              </div>
+            </div>
+            <div class="list-row stacked" id="clockRow">
+              <span>Time</span>
+              <div class="seg" role="radiogroup" aria-label="Time" data-opt="clock">
+                <button role="radio" data-value="24">24-hour</button>
+                <button role="radio" data-value="12">12-hour AM/PM</button>
+              </div>
+            </div>
+            <label class="list-row" id="secondsRow">
+              <span>Seconds</span>
+              <span class="switch"><input type="checkbox" id="fSeconds"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+            </label>
+          </div>
+          <h3 class="list-label">Timestamp</h3>
+          <div class="card">
+            <div class="list-row stacked">
               <div class="seg" role="radiogroup" aria-label="Timestamp source" id="dtSource"></div>
               <small id="dtSourceNote"></small>
             </div>
@@ -351,7 +417,7 @@
           <p class="export-meta" id="exportStats"></p>
           <div class="export-actions">
             <button class="btn-primary" id="shareBtn" hidden>Share to SELPHY app</button>
-            <a class="btn-primary" id="downloadLink" download aria-disabled="true">Save JPEG</a>
+            <a class="btn-primary" id="downloadLink" download aria-disabled="true">Save PNG</a>
           </div>
         </div>
       </div>
@@ -370,7 +436,7 @@
       <ol class="how">
         <li><span class="how-n">1</span><div><b>Add one or two photos.</b> Each is cropped to the Instax window (46 : 62) from its original pixels, never stretched. Turn or flip any photo.</div></li>
         <li><span class="how-n">2</span><div><b>Choose a frame colour and captions.</b> The photo’s date is added by default; save your favourite caption styles as templates.</div></li>
-        <li><span class="how-n">3</span><div><b>Print and cut.</b> Print the JPEG from the SELPHY app, then cut down the middle for two Instax-style prints.</div></li>
+        <li><span class="how-n">3</span><div><b>Print and cut.</b> Print the PNG from the SELPHY app, then cut down the middle for two Instax-style prints.</div></li>
       </ol>
       <p class="note">Nothing is uploaded. Photos stay on this device; settings and templates are saved in this browser.</p>
     </div>

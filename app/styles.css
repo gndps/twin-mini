@@ -512,3 +512,16 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
 #dateFormats { margin-top: 4px; }
 
 .card .chip:not([aria-checked="true"]):not([aria-pressed="true"]) { background: var(--surface); }
+
+/* ---------- Date ---------- */
+.date-card .list-row { padding: 6px 16px 6px 10px; }
+.date-open { flex: 1; display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 6px 0; text-align: left; min-width: 0; }
+.date-text { flex: 1; min-width: 0; }
+.date-text b { display: block; font-weight: 500; font-size: 15px; }
+.date-text small { display: block; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.date-card .switch { margin-left: 4px; }
+.date-preview {
+  margin: 4px 0 14px; padding: 18px 12px; text-align: center; border-radius: var(--r);
+  background: var(--card); font-size: 26px; line-height: 1.2; color: var(--ink); min-height: 30px;
+}
+.date-card + .card:not(:empty) { margin-top: 8px; }
