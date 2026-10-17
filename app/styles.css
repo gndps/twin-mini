@@ -566,3 +566,13 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
   .sheet-modal:not(#layoutDlg)::backdrop { background: transparent; }
   .sheet-modal:not(#layoutDlg) { box-shadow: 0 -10px 30px -12px rgba(30, 20, 10, .3); }
 }
+
+.text-proxy {
+  display: block; width: 100%; text-align: left; border: 0; border-radius: 8px;
+  background: var(--surface); padding: 9px 10px; font: 16px var(--ui); color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text;
+}
+.text-proxy.empty { color: #B3ADA5; }
+.text-proxy:hover { box-shadow: inset 0 0 0 1px var(--line-2, rgba(0,0,0,.12)); }
+#layerTexts .text-proxy + .text-proxy { margin-top: 8px; }
+#layerTexts .list-foot { margin: 8px 2px 0; }
