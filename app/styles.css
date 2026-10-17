@@ -535,3 +535,34 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
 .paper-row .dims { color: var(--muted); font-size: 13px; white-space: nowrap; }
 #templateChips:empty { display: none; }
 .paper-row .dims, .paper-row .check { flex: none; }
+
+/* ---------- In-place caption editing ---------- */
+.cap-layer { position: absolute; inset: 0; pointer-events: none; }
+.cap-edit {
+  position: absolute; pointer-events: auto; transform-origin: center;
+  border: 0; margin: 0; padding: 0; border-radius: 2px;
+  background: transparent; color: transparent; caret-color: var(--accent);
+  font-size: 16px; line-height: 1; outline: none; cursor: text;
+}
+.cap-edit::placeholder { color: rgba(60, 50, 40, .38); }
+.cap-edit:hover { background: rgba(217, 105, 76, .07); }
+.cap-edit:focus { color: var(--cap-ink); background: rgba(255, 255, 255, .55); box-shadow: 0 0 0 1px rgba(217, 105, 76, .7); }
+.cap-edit:focus::placeholder { color: rgba(60, 50, 40, .25); }
+
+@media (max-width: 860px) {
+  /* The preview stays on screen while scrolling the options. */
+  .stage {
+    position: sticky; top: 0; z-index: 15; background: #fff;
+    padding-top: max(6px, env(safe-area-inset-top));
+    box-shadow: 0 10px 16px -14px rgba(0, 0, 0, .25);
+  }
+  .sheet { width: min(100%, 34dvh * var(--ar)); }
+  .sheet-wrap { padding: 4px 0 8px; }
+  .stage-meta { margin: 0 0 6px; font-size: 12px; }
+  /* Option sheets take at most half the screen, with no dimming, so the preview stays visible.
+     Photo size & position keeps its taller sheet: it has its own large preview. */
+  .sheet-modal:not(#layoutDlg) { max-height: 50dvh; }
+  .sheet-modal:not(#layoutDlg) .sheet-inner { max-height: 50dvh; }
+  .sheet-modal:not(#layoutDlg)::backdrop { background: transparent; }
+  .sheet-modal:not(#layoutDlg) { box-shadow: 0 -10px 30px -12px rgba(30, 20, 10, .3); }
+}
