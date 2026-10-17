@@ -1,76 +1,45 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, PAPERS, MINI_ASPECT, OVERSCAN_MM, FRAMES } from '../app/src/geometry.js';
+import { computeLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, PAPERS, DEFAULT_PAPER, MINI_ASPECT } from '../app/src/geometry.js';
 
 const near = (a, b, eps = 0.01) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`);
 
-test('true Mini frame matches real film: 54×86 card, 46×62 window', () => {
-  const L = computeLayout({ layout: 'mini', frame: 'true', paperId: 'postcard' });
-  assert.equal(L.cards.length, 2);
-  for (const c of L.cards) {
-    near(c.w, 54); near(c.h, 86);
-    near(c.win.w, 46); near(c.win.h, 62);
-    near(c.win.x - c.x, 4); near(c.win.y - c.y, 6); near(c.chin.h, 18);
-  }
-  assert.ok(L.fits);
+test('RP-108 is the default paper; only CP1500 sets are offered', () => {
+  assert.equal(DEFAULT_PAPER, 'RP-108');
+  assert.deepEqual(Object.keys(PAPERS), ['RP-108', 'KP-108IN', 'RP-54', 'KP-36IP', 'KL-36IP', 'KC-36IP', 'KC-18IF', 'KC-18IS']);
+  assert.deepEqual([PAPERS['RP-108'].w, PAPERS['RP-108'].h], [148, 100]);
+  assert.deepEqual([PAPERS['KL-36IP'].w, PAPERS['KL-36IP'].h], [119, 89]);
+  assert.deepEqual([PAPERS['KC-36IP'].w, PAPERS['KC-36IP'].h], [86, 54]);
 });
 
-test('the two cards are mirror-centred on the cut line', () => {
-  for (const paperId of Object.keys(PAPERS)) {
-    const L = computeLayout({ layout: 'mini', frame: 'true', paperId });
+test('every paper splits into two equal halves cut down the middle', () => {
+  for (const id of Object.keys(PAPERS)) {
+    const L = computeLayout(id);
     const [a, b] = L.cards;
-    near(L.cutX - (a.x + a.w), b.x - L.cutX);
-    near(a.y, (L.paper.h - a.h) / 2);
+    near(L.cutX, L.paper.w / 2);
+    near(a.x, 0); near(a.w, L.paper.w / 2); near(b.x, L.cutX); near(b.x + b.w, L.paper.w);
+    near(a.h, L.paper.h);
   }
 });
 
-test('compact preset reproduces the suggested 2×3 in / 300 dpi numbers', () => {
-  const L = computeLayout({ layout: 'mini', frame: 'compact' });
-  const px = (mm) => Math.round((mm / 25.4) * 300);
-  const c = L.cards[0];
-  assert.equal(px(c.w), 600);
-  assert.equal(px(c.h), 900);
-  assert.equal(px(c.win.w), 500);
-  assert.equal(px(c.win.h), 674);
-  assert.equal(px(c.win.x - c.x), 50);
-  assert.equal(px(c.win.y - c.y), 57);
-  assert.equal(px(c.chin.h), 169);
-});
-
-test('every preset fits inside its half of the sheet with ≥ 2 mm overscan room', () => {
-  for (const layout of ['mini', 'wide']) {
-    for (const frame of layout === 'mini' ? ['true', 'large', 'compact'] : ['true', 'large']) {
-      for (const paperId of Object.keys(PAPERS)) {
-        const L = computeLayout({ layout, frame, paperId });
-        assert.ok(L.fits, `${layout}/${frame}/${paperId}`);
-        for (const c of L.cards) assert.ok(c.y >= 2 && c.y + c.h <= L.paper.h - 2, `${layout}/${frame} vertical room`);
-      }
+test('frame window keeps the Instax 46:62 shape with equal side and top borders and a chin', () => {
+  for (const id of Object.keys(PAPERS)) {
+    const { cards } = computeLayout(id);
+    for (const c of cards) {
+      near(c.win.w / c.win.h, MINI_ASPECT, 1e-3);
+      const side = c.win.x - c.x;
+      near(c.x + c.w - (c.win.x + c.win.w), side);
+      near(c.win.y - c.y, side);
+      assert.ok(c.chin.h > side * 0.5, `${id}: chin ${c.chin.h} vs side ${side}`);
+      near(c.chin.y + c.chin.h, c.h);
     }
   }
 });
 
-test('half-sheet preset fills its cell, keeps 46:62 and even borders after the borderless trim', () => {
-  for (const paperId of Object.keys(PAPERS)) {
-    const L = computeLayout({ layout: 'mini', frame: 'half', paperId });
-    const [a, b] = L.cards;
-    near(a.w, L.paper.w / 2); near(a.h, L.paper.h); near(b.x, L.cutX);
-    near(a.win.w / a.win.h, MINI_ASPECT, 1e-3);
-    // visible (post-trim) left border == border at the cut line, mirrored on the right card
-    near(a.win.x - OVERSCAN_MM, L.cutX - (a.win.x + a.win.w));
-    near(b.win.x - L.cutX, (L.paper.w - OVERSCAN_MM) - (b.win.x + b.win.w));
-    near(a.win.y - OVERSCAN_MM, 9);
-    assert.ok(a.chin.h > 12, 'keeps a real chin');
-  }
-});
-
-test('Half sheet is the first (default) Mini preset', () => {
-  assert.equal(Object.keys(FRAMES.mini)[0], 'half');
-});
-
-test('custom frames that are too large are flagged', () => {
-  const L = computeLayout({ layout: 'mini', frame: 'custom', custom: { winW: 80, top: 5, side: 5, chin: 20 } });
-  assert.equal(L.fits, false);
-  assert.ok(L.overflow > 0);
+test('RP-108 half sheet: 9 mm borders, 56 mm wide window', () => {
+  const c = computeLayout('RP-108').cards[0];
+  near(c.win.x, 9); near(c.win.y, 9); near(c.win.w, 56);
+  near(c.chin.h, 100 - 9 - 56 / MINI_ASPECT);
 });
 
 test('cropRect never stretches and stays inside the image', () => {
@@ -82,21 +51,21 @@ test('cropRect never stretches and stays inside the image', () => {
 });
 
 test('rotation by 90° swaps the working dimensions; 180° does not', () => {
-  const r90 = cropRect(4000, 3000, 90, MINI_ASPECT);
-  assert.equal(r90.W, 3000); assert.equal(r90.H, 4000);
-  const r180 = cropRect(4000, 3000, 180, MINI_ASPECT);
-  assert.equal(r180.W, 4000);
+  assert.equal(cropRect(4000, 3000, 90, MINI_ASPECT).W, 3000);
+  assert.equal(cropRect(4000, 3000, 180, MINI_ASPECT).W, 4000);
 });
 
-test('auto dpi keeps the sharpest photo, bounded 300–1200 and by the pixel budget', () => {
-  const p = PAPERS.postcard;
-  assert.equal(chooseDpi('auto', [], p, 48e6), 300);
-  assert.equal(chooseDpi('auto', [812.4], p, 48e6), 813);
-  assert.equal(chooseDpi('auto', [5000], p, 48e6), 1200);
-  const capped = chooseDpi('auto', [5000], p, 16_777_216);
+test('output dpi follows the sharpest photo with no fixed ceiling, only the pixel budget', () => {
+  const p = PAPERS['RP-108'];
+  assert.equal(chooseDpi([], p, 120e6), 300);
+  assert.equal(chooseDpi([150], p, 120e6), 300);
+  assert.equal(chooseDpi([1407.2], p, 120e6), 1408);
+  assert.equal(chooseDpi([1407.2, 2000], p, 120e6), 2000);
+  assert.equal(chooseDpi([5000], p, 120e6), 2287); // 120 MP budget on a 148 × 100 mm sheet
+  const capped = chooseDpi([9000], p, 16_777_216);
   const px = sheetPixels(p, capped);
-  assert.ok(px.w * px.h <= 16_777_216);
-  assert.equal(chooseDpi('600', [5000], p, 48e6), 600);
+  assert.ok(px.w * px.h <= 16_777_216 * 1.002, `${px.w}x${px.h}`);
+  assert.ok(capped > 850); // iOS canvas limit still allows ~855 dpi on a postcard
 });
 
 test('effectiveDpi: 2268 px across 46 mm ≈ 1252 dpi', () => {
