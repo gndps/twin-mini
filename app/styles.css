@@ -576,3 +576,10 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
 .text-proxy:hover { box-shadow: inset 0 0 0 1px var(--line-2, rgba(0,0,0,.12)); }
 #layerTexts .text-proxy + .text-proxy { margin-top: 8px; }
 #layerTexts .list-foot { margin: 8px 2px 0; }
+
+/* ---------- Settings tabs ---------- */
+.tab-bar { margin: 2px 0 -6px; }
+.tab-bar button { min-height: 40px; font-size: 14px; font-weight: 600; }
+.tab-panel { display: flex; flex-direction: column; gap: 22px; }
+.tab-panel:not(.active) { display: none; }
+.tab-panel .group > .list-label:first-child { margin-top: 0; }

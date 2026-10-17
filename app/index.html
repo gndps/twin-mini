@@ -47,33 +47,6 @@
     <aside class="inspector" aria-label="Settings">
       <div class="inspector-scroll">
         <section class="group">
-          <h2 class="group-title">Layout</h2>
-          <div class="card">
-            <div class="list-row stacked">
-              <div class="seg seg-lg" role="radiogroup" aria-label="Format" id="formatSeg">
-                <button role="radio" data-value="two">
-                  <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="5" y="3" width="12" height="18" rx="1"/><rect x="19" y="3" width="12" height="18" rx="1"/><path d="M8 6h6v8H8zM22 6h6v8h-6z"/></svg>
-                  Two Minis
-                </button>
-                <button role="radio" data-value="one">
-                  <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="4" y="3" width="28" height="18" rx="1"/><path d="M8 6h20v10H8z"/></svg>
-                  One Wide
-                </button>
-              </div>
-              <div class="seg" role="radiogroup" aria-label="Orientation" id="orientSeg">
-                <button role="radio" data-value="landscape">Landscape</button>
-                <button role="radio" data-value="portrait">Portrait</button>
-              </div>
-            </div>
-            <button class="list-row nav" data-open="layoutDlg">
-              <span>Photo size &amp; position</span>
-              <span class="row-value" id="layoutValue"></span>
-              <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
-            </button>
-          </div>
-        </section>
-
-        <section class="group">
           <div class="group-head">
             <h2 class="group-title">Photos</h2>
             <button class="text-btn" id="swapBtn" hidden>
@@ -83,49 +56,94 @@
           <div class="card" id="photoList"></div>
         </section>
 
-        <section class="group">
-          <h2 class="group-title">Frame</h2>
-          <div class="card">
-            <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
-            <label class="list-row" id="marksRow">
-              <span>Cut guide<small>A faint dashed hairline down the middle</small></span>
-              <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
-            </label>
-          </div>
-        </section>
+        <div class="seg tab-bar" role="tablist" aria-label="Settings" id="tabBar">
+          <button role="tab" data-tab="frame" aria-controls="panel-frame">Frame</button>
+          <button role="tab" data-tab="captions" aria-controls="panel-captions">Captions</button>
+          <button role="tab" data-tab="paper" aria-controls="panel-paper">Paper</button>
+        </div>
 
-        <section class="group">
-          <div class="group-head">
-            <h2 class="group-title">Captions</h2>
-            <button class="text-btn" data-open="templatesDlg">Templates</button>
-          </div>
-          <div class="chips" id="templateChips" role="list" aria-label="Caption templates"></div>
-          <div class="card date-card">
-            <div class="list-row">
-              <button class="date-open" id="dateEdit">
-                <span class="layer-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12" rx="2"/><path d="M3 8.5h14M7 3v3M13 3v3"/></svg></span>
-                <span class="date-text"><b>Date</b><small id="dateSummary"></small></span>
+        <div class="tab-panel" id="panel-frame" role="tabpanel" data-panel="frame">
+          <section class="group">
+            <h2 class="group-title">Layout</h2>
+            <div class="card">
+              <div class="list-row stacked">
+                <div class="seg seg-lg" role="radiogroup" aria-label="Format" id="formatSeg">
+                  <button role="radio" data-value="two">
+                    <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="5" y="3" width="12" height="18" rx="1"/><rect x="19" y="3" width="12" height="18" rx="1"/><path d="M8 6h6v8H8zM22 6h6v8h-6z"/></svg>
+                    Two Minis
+                  </button>
+                  <button role="radio" data-value="one">
+                    <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="4" y="3" width="28" height="18" rx="1"/><path d="M8 6h20v10H8z"/></svg>
+                    One Wide
+                  </button>
+                </div>
+                <div class="seg" role="radiogroup" aria-label="Orientation" id="orientSeg">
+                  <button role="radio" data-value="landscape">Landscape</button>
+                  <button role="radio" data-value="portrait">Portrait</button>
+                </div>
+              </div>
+              <button class="list-row nav" data-open="layoutDlg">
+                <span>Photo size &amp; position</span>
+                <span class="row-value" id="layoutValue"></span>
                 <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
               </button>
-              <span class="switch"><input type="checkbox" id="dateToggle" aria-label="Show the date"><span class="switch-track"><span class="switch-thumb"></span></span></span>
             </div>
-          </div>
-          <div class="card" id="layerList"></div>
-          <div class="add-pair">
-            <button class="text-btn" id="addText"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Caption</button>
-          </div>
-        </section>
+          </section>
 
-        <section class="group">
-          <h2 class="group-title">Advanced</h2>
-          <div class="card">
-            <button class="list-row nav" data-open="paperDlg">
-              <span>Paper</span>
-              <span class="row-value" id="paperValue">RP-108</span>
-              <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
-            </button>
-          </div>
-        </section>
+          <section class="group">
+            <h2 class="group-title">Frame</h2>
+            <div class="card">
+              <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
+              <label class="list-row" id="marksRow">
+                <span>Cut guide<small>A faint dashed hairline down the middle</small></span>
+                <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <div class="tab-panel" id="panel-captions" role="tabpanel" data-panel="captions">
+          <section class="group">
+            <div class="group-head">
+              <h2 class="group-title">Captions</h2>
+              <button class="text-btn" data-open="templatesDlg">Templates</button>
+            </div>
+            <div class="chips" id="templateChips" role="list" aria-label="Caption templates"></div>
+            <div class="card date-card">
+              <div class="list-row">
+                <button class="date-open" id="dateEdit">
+                  <span class="layer-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12" rx="2"/><path d="M3 8.5h14M7 3v3M13 3v3"/></svg></span>
+                  <span class="date-text"><b>Date</b><small id="dateSummary"></small></span>
+                  <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+                </button>
+                <span class="switch"><input type="checkbox" id="dateToggle" aria-label="Show the date"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+              </div>
+            </div>
+            <div class="card" id="layerList"></div>
+            <div class="add-pair">
+              <button class="text-btn" id="addText"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Caption</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="tab-panel" id="panel-paper" role="tabpanel" data-panel="paper">
+          <section class="group">
+          <h3 class="list-label">Size</h3>
+          <form class="card size-fields" id="paperSize">
+            <label>Width<input type="number" inputmode="decimal" step="0.1" min="40" max="420" id="paperW" aria-label="Paper width in mm"><span>mm</span></label>
+            <span class="times" aria-hidden="true">×</span>
+            <label>Height<input type="number" inputmode="decimal" step="0.1" min="40" max="420" id="paperH" aria-label="Paper height in mm"><span>mm</span></label>
+          </form>
+          <p class="list-foot" id="paperSizeNote">Pick a paper below, or type any size for a custom sheet.</p>
+  
+          <h3 class="list-label">Canon SELPHY CP1500</h3>
+          <div class="card" id="paperList" role="radiogroup" aria-label="CP1500 paper"></div>
+  
+          <h3 class="list-label">Other printer paper</h3>
+          <div class="card" id="otherPaperList" role="radiogroup" aria-label="Other paper sizes"></div>
+          </section>
+        </div>
+
       </div>
 
       <div class="inspector-foot">
@@ -355,33 +373,6 @@
           <div class="import-actions"><button class="done-btn" type="submit">Import</button></div>
         </form>
         <p class="list-foot">The same text works in <code>app/templates.json</code> to ship templates with the site.</p>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- Paper -->
-  <dialog class="sheet-modal" id="paperDlg" aria-labelledby="paperTitle">
-    <div class="sheet-inner">
-      <header class="sheet-head">
-        <span class="grabber" aria-hidden="true"></span>
-        <span></span>
-        <h2 id="paperTitle">Paper</h2>
-        <button class="done-btn" data-close>Done</button>
-      </header>
-      <div class="sheet-body">
-        <h3 class="list-label">Size</h3>
-        <form class="card size-fields" id="paperSize">
-          <label>Width<input type="number" inputmode="decimal" step="0.1" min="40" max="420" id="paperW" aria-label="Paper width in mm"><span>mm</span></label>
-          <span class="times" aria-hidden="true">×</span>
-          <label>Height<input type="number" inputmode="decimal" step="0.1" min="40" max="420" id="paperH" aria-label="Paper height in mm"><span>mm</span></label>
-        </form>
-        <p class="list-foot" id="paperSizeNote">Pick a paper below, or type any size for a custom sheet.</p>
-
-        <h3 class="list-label">Canon SELPHY CP1500</h3>
-        <div class="card" id="paperList" role="radiogroup" aria-label="CP1500 paper"></div>
-
-        <h3 class="list-label">Other printer paper</h3>
-        <div class="card" id="otherPaperList" role="radiogroup" aria-label="Other paper sizes"></div>
       </div>
     </div>
   </dialog>
