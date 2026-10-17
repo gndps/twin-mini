@@ -1,3 +1,45 @@
 {
-  "templates": []
+  "templates": [
+    {
+      "twinmini": "caption-template",
+      "version": 2,
+      "name": "Mini-tiddu",
+      "captions": [
+        {
+          "kind": "text",
+          "font": "Caveat",
+          "size": 4.4,
+          "edge": "bottom",
+          "align": "start",
+          "color": "auto",
+          "shift": -4.7,
+          "ref": 23.68,
+          "same": false,
+          "text": "",
+          "texts": ["Sleeping in kishti o ff before fruit with", ""]
+        }
+      ],
+      "date": {
+        "on": true,
+        "source": "photo",
+        "font": "Caveat",
+        "size": 3,
+        "edge": "left",
+        "align": "end",
+        "color": "auto",
+        "shift": 0,
+        "ref": 4.958,
+        "fmt": {
+          "show": "datetime",
+          "order": "mdy",
+          "month": "short",
+          "year": "full",
+          "sep": ".",
+          "weekday": "short",
+          "clock": "12",
+          "seconds": false
+        }
+      }
+    }
+  ]
 }
