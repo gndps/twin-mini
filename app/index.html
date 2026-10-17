@@ -87,7 +87,7 @@
           <div class="card">
             <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
             <label class="list-row" id="marksRow">
-              <span>Cut guide<small>A faint hint at the top and bottom of the centre line</small></span>
+              <span>Cut guide<small>A faint dashed hairline down the middle</small></span>
               <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
             </label>
           </div>
@@ -102,7 +102,7 @@
           <div class="card" id="layerList"></div>
           <div class="add-pair">
             <button class="text-btn" id="addText"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Text</button>
-            <button class="text-btn" id="addDate"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Date</button>
+            <button class="text-btn" id="addDate"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Date / time</button>
           </div>
         </section>
 
@@ -173,9 +173,18 @@
           <div class="text-fields" id="layerTexts"></div>
         </div>
         <div id="layerDateBlock">
-          <h3 class="list-label">Date format</h3>
-          <div class="chips wrap" id="dateFormats"></div>
-          <p class="list-foot">Taken from each photo’s capture date, or the file date.</p>
+          <div class="card">
+            <div class="list-row stacked">
+              <span>Show</span>
+              <div class="seg" role="radiogroup" aria-label="Show" id="dtGroup"></div>
+              <div class="chips wrap" id="dateFormats" role="radiogroup" aria-label="Format"></div>
+            </div>
+            <div class="list-row stacked">
+              <span>Timestamp</span>
+              <div class="seg" role="radiogroup" aria-label="Timestamp source" id="dtSource"></div>
+              <small id="dtSourceNote"></small>
+            </div>
+          </div>
         </div>
 
         <h3 class="list-label">Style</h3>

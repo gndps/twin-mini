@@ -508,3 +508,8 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
 .import-actions { display: flex; justify-content: flex-end; }
 .list-foot code { font-size: 12px; background: var(--card); padding: 1px 5px; border-radius: 4px; }
 .tpl-row .exp { color: var(--ink-2); }
+
+#dtSourceNote { color: var(--muted); font-size: 13px; margin-top: -2px; }
+#dateFormats { margin-top: 4px; }
+
+.card .chip:not([aria-checked="true"]):not([aria-pressed="true"]) { background: var(--surface); }
