@@ -19,7 +19,7 @@ Everything runs in the browser. Photos are never uploaded; settings and caption 
 - **Templates.** Your own (saved on the device until you delete them) and site templates appear as chips. Any template can be copied as text and imported again.
 - **Cut guide.** Optional: short, sparse hairline dashes evenly spaced down the whole centre line, nothing else.
 - **Orientation.** EXIF orientation is honoured; each photo can be turned left/right or flipped 180° (rotation only, never mirrored), panned and zoomed.
-- **Phone first.** Large touch targets, bottom sheets, full-screen crop editor with pinch-to-zoom, share straight to the SELPHY app.
+- **Phone first.** The preview stays pinned at the top while you scroll; option sheets take at most half the screen so the preview stays visible (Photo size & position has its own large preview); tap a caption on the print to type it in place; large touch targets, full-screen crop editor with pinch-to-zoom, share straight to the SELPHY app.
 
 ## Shipping templates with the site
 
