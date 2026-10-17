@@ -14,9 +14,9 @@ Everything runs in the browser. Photos are never uploaded; settings and caption 
 - **Photo size & position.** Pick the photo shape from instant-camera film formats (Instax Mini 46×62, Square 62×62 for Instax Square / Polaroid / Polaroid Go, Instax Wide 99×62, 2×3 ZINK for Kodak Printomatic / Smile / Polaroid Snap), then scale it (shape stays fixed) and move it up or down. It always stays centred left to right, so Two Minis is still a single straight cut.
 - **CP1500 paper only**, chosen by Canon set name in Advanced: RP-108 (default), KP-108IN, RP-54, KP-36IP (postcard), KL-36IP (L size), KC-36IP and KC-18IF (card size), KC-18IS (square label).
 - **Best possible file.** Always a maximum-quality JPEG at the resolution of your sharpest photo (no fixed cap, only the browser's canvas limit), with the dpi written into the file.
-- **Captions.** The photo's own date (EXIF capture date, else file date) is added by default. Add any number of text or date captions on any edge with their own font, size, alignment and colour; each photo can have its own text. 37 free fonts in six styles.
+- **Captions.** The photo's own date (EXIF capture time, else file time) is added by default. Date captions can show a date, a time, or both, in many formats (2026.10.17, '26 10 17, 17 Oct 2026, 4:05 PM, 2026.10.17 16:05 …), using the photo's timestamp or *now*. Your last choice is remembered for new date captions. Add any number of text or date captions on any edge with their own font, size, alignment and colour; each photo can have its own text. 37 free fonts in six styles.
 - **Templates.** Built-in templates, your own (saved on the device until you delete them), and site templates. Any template can be copied as text and imported again.
-- **Cut guide.** Optional: a few short, sparse hairline dashes at the top and bottom of the centre line, nothing else.
+- **Cut guide.** Optional: short, sparse hairline dashes evenly spaced down the whole centre line, nothing else.
 - **Orientation.** EXIF orientation is honoured; each photo can be turned left/right or flipped 180° (rotation only, never mirrored), panned and zoomed.
 - **Phone first.** Large touch targets, bottom sheets, full-screen crop editor with pinch-to-zoom, share straight to the SELPHY app.
 
@@ -33,7 +33,7 @@ In the app, open **Captions → Templates → Copy** on a template (or *Copy all
 }
 ```
 
-A single exported template, an array of them, or `{ "templates": [...] }` all work, both here and in the app's Import box. Push, and every visitor sees them as chips after the built-in ones. Caption fields: `kind` (`date`/`text`), `font` (any font in the picker), `size` (mm), `edge` (`bottom`/`top`/`left`/`right`), `align` (`start`/`center`/`end`), `color` (`auto`/`ink`/`grey`/`stamp`/`navy`/`red`/`white`), `dateFormat` (`dots`/`stamp`/`dmy`/`mdy`/`slash`/`month`), and for text `same` + `text`, or `texts` per photo.
+A single exported template, an array of them, or `{ "templates": [...] }` all work, both here and in the app's Import box. Push, and every visitor sees them as chips after the built-in ones. Caption fields: `kind` (`date`/`text`), `font` (any font in the picker), `size` (mm), `edge` (`bottom`/`top`/`left`/`right`), `align` (`start`/`center`/`end`), `color` (`auto`/`ink`/`grey`/`stamp`/`navy`/`red`/`white`), `dateFormat` (date: `dots` `stamp` `iso` `dmy` `mdy` `slash` `us` `month` `weekday` `long` `year`; time: `t24` `t12` `t24s` `tdot`; both: `dots-t24` `stamp-t24` `iso-t24` `dmy-t12` `mdy-t12` `weekday-t24`), `source` (`photo`/`now`), and for text `same` + `text`, or `texts` per photo.
 
 ## Develop
 
