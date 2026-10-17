@@ -13,8 +13,9 @@ Everything runs in the browser. Photos are never uploaded; settings and caption 
 - **Two Minis or One Wide** (main screen). Two Minis splits the sheet into two Instax-style cards that you cut down the middle. One Wide fills the sheet with a single frame, in landscape or portrait (portrait files come out upright and the SELPHY app turns them onto the paper).
 - **Photo size & position.** A sheet with a large single-photo preview and three sliders: **Width** (grows evenly on both sides), **Height** (grows downward, top border stays put) and **Top border**. Shape presets (Instax Mini 46×62, Square for Instax Square / Polaroid, 4:5, 3:4, 2:3 for 35 mm / ZINK, 5:7, 9:16) keep their shape as you change the width; dragging Height makes it a custom shape. Always centred left to right, so Two Minis is still a single straight cut. Landscape One Wide shows the shape rotated, with a switch to turn it back. Two Minis and One Wide remember their own settings.
 - **CP1500 paper only**, chosen by Canon set name in Advanced: RP-108 (default), KP-108IN, RP-54, KP-36IP (postcard), KL-36IP (L size), KC-36IP and KC-18IF (card size), KC-18IS (square label).
-- **Best possible file.** Always a maximum-quality JPEG at the resolution of your sharpest photo (no fixed cap, only the browser's canvas limit), with the dpi written into the file.
-- **Captions.** The photo's own date (EXIF capture time, else file time) is added by default. Date captions can show a date, a time, or both, in many formats (2026.10.17, '26 10 17, 17 Oct 2026, 4:05 PM, 2026.10.17 16:05 …), using the photo's timestamp or *now*. Your last choice is remembered for new date captions. Add any number of text or date captions on any edge with their own font, size, alignment, colour and distance from the photo (closer, further, or overlapping it); each photo can have its own text. 37 free fonts in six styles.
+- **Best possible file.** Always a lossless PNG at the resolution of your sharpest photo (no fixed cap, only the browser's canvas limit), with the dpi written into the file.
+- **Date.** One date per print, switched on or off on its own, separate from the captions. Show the date or date & time, and compose the format: order (Y M D / D M Y / M D Y), month (10 / Oct / October), year (2026 / '26 / none), separator, weekday (none / Sat / Saturday), 24-hour or 12-hour AM/PM, seconds. The timestamp comes from the photo (EXIF capture time, else file time) or *now*.
+- **Captions.** Any number of text captions on any edge with their own font, size, alignment, colour and distance from the photo (closer, further, or overlapping it); each photo can have its own text. 37 free fonts in six styles.
 - **Templates.** Built-in templates, your own (saved on the device until you delete them), and site templates. Any template can be copied as text and imported again.
 - **Cut guide.** Optional: short, sparse hairline dashes evenly spaced down the whole centre line, nothing else.
 - **Orientation.** EXIF orientation is honoured; each photo can be turned left/right or flipped 180° (rotation only, never mirrored), panned and zoomed.
@@ -27,13 +28,18 @@ In the app, open **Captions → Templates → Copy** on a template (or *Copy all
 ```json
 {
   "templates": [
-    { "twinmini": "caption-template", "version": 1, "name": "Retro stamp",
-      "captions": [ { "kind": "date", "font": "VT323", "size": 4.4, "edge": "bottom", "align": "end", "color": "stamp", "dateFormat": "stamp" } ] }
+    { "twinmini": "caption-template", "version": 2, "name": "Retro stamp",
+      "captions": [],
+      "date": { "on": true, "font": "VT323", "size": 4.4, "edge": "bottom", "align": "end", "color": "stamp",
+                "fmt": { "year": "short", "sep": " " } } }
   ]
 }
 ```
 
-A single exported template, an array of them, or `{ "templates": [...] }` all work, both here and in the app's Import box. Push, and every visitor sees them as chips after the built-in ones. Caption fields: `kind` (`date`/`text`), `font` (any font in the picker), `size` (mm), `edge` (`bottom`/`top`/`left`/`right`), `align` (`start`/`center`/`end`), `color` (`auto`/`ink`/`grey`/`stamp`/`navy`/`red`/`white`), `shift` (mm from centred, −15 … 15; negative = toward/over the photo), `dateFormat` (date: `dots` `stamp` `iso` `dmy` `mdy` `slash` `us` `month` `weekday` `long` `year`; time: `t24` `t12` `t24s` `tdot`; both: `dots-t24` `stamp-t24` `iso-t24` `dmy-t12` `mdy-t12` `weekday-t24`), `source` (`photo`/`now`), and for text `same` + `text`, or `texts` per photo.
+A single exported template, an array of them, or `{ "templates": [...] }` all work, both here and in the app's Import box. Push, and every visitor sees them as chips after the built-in ones.
+
+- `captions`: text captions with `font` (any font in the picker), `size` (mm), `edge` (`bottom`/`top`/`left`/`right`), `align` (`start`/`center`/`end`), `color` (`auto`/`ink`/`grey`/`stamp`/`navy`/`red`/`white`), `shift` (mm from centred, −15 … 15; negative = toward/over the photo), and `same` + `text`, or `texts` (one per photo).
+- `date`: `on`, `source` (`photo`/`now`), the same style fields, and `fmt`: `show` (`date`/`datetime`), `order` (`ymd`/`dmy`/`mdy`), `month` (`num`/`short`/`long`), `year` (`full`/`short`/`none`), `sep` (`.` `/` `-` or space), `weekday` (`none`/`short`/`long`), `clock` (`24`/`12`), `seconds` (`true`/`false`).
 
 ## Develop
 
