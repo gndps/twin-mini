@@ -77,3 +77,33 @@ export function sanitizeLayers(layers) {
     size: Number.isFinite(l.size) ? Math.min(14, Math.max(1.5, l.size)) : 4.5,
   }));
 }
+
+/* ---------------- template text format (export / import / site templates) ---------------- */
+// One template:  {"twinmini":"caption-template","version":1,"name":"…","captions":[…]}
+// Several: an array of those, or {"templates":[…]}. Caption fields: kind ("date" | "text"),
+// font, size (mm), edge, align, color, dateFormat (date), same/text/texts (text).
+export const TEMPLATE_FORMAT = 'caption-template';
+const KEEP = ['kind', 'font', 'size', 'edge', 'align', 'color', 'dateFormat', 'same', 'text', 'texts'];
+
+export function templateToJson(name, layers) {
+  return {
+    twinmini: TEMPLATE_FORMAT, version: 1, name,
+    captions: layers.map((l) => Object.fromEntries(KEEP.filter((k) => l[k] !== undefined && !(l.kind === 'date' && ['same', 'text', 'texts'].includes(k))).map((k) => [k, l[k]]))),
+  };
+}
+export const exportTemplatesText = (list) =>
+  JSON.stringify(list.length === 1 ? templateToJson(list[0].name, list[0].layers) : list.map((t) => templateToJson(t.name, t.layers)), null, 2);
+
+/** Parse exported text back into [{name, layers}]; throws a readable Error on bad input. */
+export function parseTemplatesText(text) {
+  let data;
+  try { data = JSON.parse(String(text).trim()); } catch { throw new Error('That isn’t template text (invalid JSON).'); }
+  const list = Array.isArray(data) ? data : Array.isArray(data?.templates) ? data.templates : [data];
+  const out = list.map((t) => {
+    if (!t || typeof t !== 'object' || !Array.isArray(t.captions)) throw new Error('Missing "captions" list.');
+    const layers = sanitizeLayers(t.captions);
+    return { name: String(t.name || 'Imported').slice(0, 30), layers };
+  });
+  if (!out.length) throw new Error('No templates found.');
+  return out;
+}

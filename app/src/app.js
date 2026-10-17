@@ -1,11 +1,11 @@
-import { computeLayout, PAPERS, DEFAULT_PAPER, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
+import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
 import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
 import { setJpegDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
 import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
 import {
   BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_FORMATS, cloneLayers, dateLayer, defaultLayers,
-  resolveLayers, sanitizeLayers, textLayer,
+  resolveLayers, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
 } from './captions.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -20,9 +20,17 @@ const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.use
 const MAX_PIXELS = isSafari ? 16_777_216 : 120_000_000;
 const touchFirst = matchMedia('(hover: none)').matches;
 
-const defaults = () => ({ color: 'white', marks: true, paperId: DEFAULT_PAPER, layers: defaultLayers(), templateId: BUILTIN_TEMPLATES[0].id });
+const defaultLayout = () => ({
+  two: { aspect: FORMATS.two.aspect, size: null, offset: null },
+  one: { aspect: FORMATS.one.aspect, size: null, offset: null, orientation: 'landscape' },
+});
+const defaults = () => ({
+  format: 'two', layout: defaultLayout(),
+  color: 'white', marks: true, paperId: DEFAULT_PAPER, layers: defaultLayers(), templateId: BUILTIN_TEMPLATES[0].id,
+});
 const state = loadState();
 let templates = loadTemplates();
+let siteTemplates = [];
 const photos = [null, null];
 let selected = null;
 
@@ -44,6 +52,15 @@ function loadState() {
   if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
   if (typeof saved.marks === 'boolean') s.marks = saved.marks;
   if (PAPERS[saved.paperId]) s.paperId = saved.paperId;
+  // Every session opens on Two Minis; any custom size/position is kept.
+  for (const f of ['two', 'one']) {
+    const L = saved.layout?.[f];
+    if (!L) continue;
+    if (ASPECTS.some((a) => a.id === L.aspect)) s.layout[f].aspect = L.aspect;
+    if (Number.isFinite(L.size)) s.layout[f].size = clamp(L.size, 0.3, 1);
+    if (Number.isFinite(L.offset)) s.layout[f].offset = clamp(L.offset, -1, 1);
+    if (f === 'one' && (L.orientation === 'portrait' || L.orientation === 'landscape')) s.layout.one.orientation = L.orientation;
+  }
   const layers = sanitizeLayers(saved.layers);
   if (layers) { s.layers = layers; s.templateId = saved.templateId ?? null; }
   return s;
@@ -57,10 +74,12 @@ const saveTemplates = () => writeJson(TEMPLATES_KEY, templates);
 
 /* ---------------- derived ---------------- */
 const frameColor = () => FRAME_COLORS.find((c) => c.id === state.color) || FRAME_COLORS[0];
-const currentLayout = () => computeLayout(state.paperId);
+const lay = () => state.layout[state.format];
+const currentLayout = () => computeLayout({ paperId: state.paperId, format: state.format, ...lay() });
+const count = () => (state.format === 'two' ? 2 : 1);
 const today = new Date();
 function renderSlots() {
-  return [0, 1].map((i) => ({
+  return Array.from({ length: count() }, (_, i) => ({
     photo: photos[i],
     captions: resolveLayers(state.layers, i, photos[i]?.date || today),
   }));
@@ -74,8 +93,8 @@ function quality(dpi) {
   if (dpi >= 200) return { cls: 'ok', label: 'Good' };
   return { cls: 'low', label: 'Low' };
 }
-const slotName = (i) => `Photo ${i + 1}`;
-const slotSide = (i) => (i === 0 ? 'Left half' : 'Right half');
+const slotName = (i) => (count() === 1 ? 'Photo' : `Photo ${i + 1}`);
+const slotSide = (i) => (count() === 1 ? 'Whole sheet' : i === 0 ? 'Left half' : 'Right half');
 const layerById = (id) => state.layers.find((l) => l.id === id);
 const fontsInUse = () => [...new Set(state.layers.map((l) => l.font))];
 
@@ -126,13 +145,14 @@ async function loadPhoto(file) {
 async function placeFiles(files, target) {
   const images = [...files].filter((f) => f.type.startsWith('image/') || /\.(hei[cf]|jpe?g|png|webp|avif)$/i.test(f.name));
   if (!images.length) return toast('Those files aren’t images.');
+  const all = Array.from({ length: count() }, (_, i) => i);
   let order;
-  if (target != null) order = [target, ...[0, 1].filter((i) => i !== target && !photos[i])];
+  if (target != null) order = [target, ...all.filter((i) => i !== target && !photos[i])];
   else {
-    order = [0, 1].filter((i) => !photos[i]);
-    if (!order.length) order = [0, 1];
+    order = all.filter((i) => !photos[i]);
+    if (!order.length) order = all;
   }
-  if (images.length > order.length) toast('The sheet holds two photos.');
+  if (images.length > order.length) toast(count() === 2 ? 'The sheet holds two photos.' : 'One Wide holds one photo.');
   await Promise.all(images.slice(0, order.length).map(async (file, k) => {
     try {
       const p = await loadPhoto(file);
@@ -243,12 +263,13 @@ const listEl = $('#photoList');
 function buildPhotoList() {
   const layout = currentLayout();
   const rows = [];
-  if (!photos[0] && !photos[1]) {
-    rows.push(addRow('Add photos', 'Choose one or two', null));
+  const n = count();
+  if (!photos.slice(0, n).some(Boolean)) {
+    rows.push(addRow(n === 2 ? 'Add photos' : 'Add photo', n === 2 ? 'Choose one or two' : 'Fills the whole sheet', null));
   } else {
-    for (const i of [0, 1]) {
+    for (let i = 0; i < n; i++) {
       const p = photos[i];
-      if (!p) { rows.push(addRow(`Add photo ${i + 1}`, `${slotSide(i)} · or leave it blank`, i)); continue; }
+      if (!p) { rows.push(addRow(`Add ${slotName(i).toLowerCase()}`, `${slotSide(i)} · or leave it blank`, i)); continue; }
       const { dpi } = photoDpi(p, layout.cards[i].win);
       const q = quality(dpi);
       const row = document.createElement('div');
@@ -274,7 +295,7 @@ function buildPhotoList() {
     }
   }
   listEl.replaceChildren(...rows);
-  $('#swapBtn').hidden = !(photos[0] || photos[1]);
+  $('#swapBtn').hidden = !(n === 2 && (photos[0] || photos[1]));
   drawThumbs();
 }
 const pa = (act, label, cls = '') => `<button class="pa ${cls}" data-act="${act}" aria-label="${label}">${icon(act)}<span>${label}</span></button>`;
@@ -460,8 +481,31 @@ $('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.che
 function allTemplates() {
   return [
     ...BUILTIN_TEMPLATES.map((t) => ({ id: t.id, name: t.name, layers: t.layers })),
+    ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, layers: () => t.layers })),
     ...templates.map((t) => ({ ...t, layers: () => t.layers })),
   ];
+}
+/** Templates shipped with the site: app/templates.json, in the same text format as Export. */
+fetch('templates.json', { cache: 'no-cache' })
+  .then((r) => (r.ok ? r.text() : null))
+  .then((text) => {
+    if (!text) return;
+    try { siteTemplates = parseTemplatesText(text); } catch { siteTemplates = []; }
+    buildTemplateChips();
+  })
+  .catch(() => {});
+
+async function copyText(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`${what} copied as text`);
+  } catch {
+    const box = $('#importText');
+    box.value = text;
+    box.focus();
+    box.select();
+    toast('Select-all and copy the text below');
+  }
 }
 function applyTemplate(t) {
   state.layers = cloneLayers(t.layers());
@@ -490,7 +534,8 @@ function buildTemplateManager() {
     const row = document.createElement('div');
     row.className = 'tpl-row';
     row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.layers.length} caption${t.layers.length === 1 ? '' : 's'}</small></span>
-      <button class="apply">Use</button><button class="del" aria-label="Delete ${escapeHtml(t.name)}">Delete</button>`;
+      <button class="apply">Use</button><button class="exp" aria-label="Copy ${escapeHtml(t.name)} as text">Copy</button><button class="del" aria-label="Delete ${escapeHtml(t.name)}">Delete</button>`;
+    row.querySelector('.exp').addEventListener('click', () => copyText(exportTemplatesText([t]), `“${t.name}”`));
     row.querySelector('.apply').addEventListener('click', () => { applyTemplate({ ...t, layers: () => t.layers }); $('#templatesDlg').close(); });
     row.querySelector('.del').addEventListener('click', () => {
       templates = templates.filter((x) => x.id !== t.id);
@@ -502,6 +547,25 @@ function buildTemplateManager() {
   }));
 }
 $('[data-open="templatesDlg"]').addEventListener('click', buildTemplateManager);
+$('#copyCurrent').addEventListener('click', () => copyText(exportTemplatesText([{ name: 'My captions', layers: state.layers }]), 'Current captions'));
+$('#copyAll').addEventListener('click', () => {
+  if (!templates.length) return toast('No saved templates yet');
+  copyText(exportTemplatesText(templates), 'Templates');
+});
+$('#importForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  let parsed;
+  try { parsed = parseTemplatesText($('#importText').value); } catch (err) { return toast(err.message); }
+  for (const t of parsed) {
+    const existing = templates.find((x) => x.name.toLowerCase() === t.name.toLowerCase());
+    const tpl = { id: existing?.id || `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t.name, layers: t.layers };
+    templates = existing ? templates.map((x) => (x.id === tpl.id ? tpl : x)) : [...templates, tpl];
+  }
+  saveTemplates();
+  $('#importText').value = '';
+  buildTemplateManager(); buildTemplateChips();
+  toast(`Imported ${parsed.length} template${parsed.length === 1 ? '' : 's'}`);
+});
 $('#tplForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const name = $('#tplName').value.trim();
@@ -537,8 +601,10 @@ function buildLayerList() {
       <div class="layer-main">
         ${l.kind === 'date'
           ? `<b>Date</b><small>${sample} · ${describe(l)}</small>`
-          : l.same
-            ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
+          : l.same || count() === 1
+            ? (l.same
+              ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
+              : `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="0" value="${escapeHtml(l.texts[0])}">`)
             : `<input type="text" maxlength="60" placeholder="Photo 1 caption" aria-label="Photo 1 caption" data-t="0" value="${escapeHtml(l.texts[0])}">
                <input type="text" maxlength="60" placeholder="Photo 2 caption" aria-label="Photo 2 caption" data-t="1" value="${escapeHtml(l.texts[1])}">`}
       </div>
@@ -585,9 +651,10 @@ function fillLayerDialog() {
   $('#layerDateBlock').hidden = l.kind !== 'date';
   if (l.kind === 'text') {
     $('#layerSame').checked = !!l.same;
+    $('#layerSame').closest('.list-row').hidden = count() === 1;
     const fields = l.same
-      ? [['all', 'Both photos', l.text]]
-      : [['0', 'Photo 1', l.texts[0]], ['1', 'Photo 2', l.texts[1]]];
+      ? [['all', count() === 1 ? 'Text' : 'Both photos', l.text]]
+      : count() === 1 ? [['0', 'Text', l.texts[0]]] : [['0', 'Photo 1', l.texts[0]], ['1', 'Photo 2', l.texts[1]]];
     $('#layerTexts').innerHTML = fields.map(([k, label, v]) =>
       `<label>${label}<input type="text" maxlength="60" data-t="${k}" value="${escapeHtml(v || '')}" enterkeyhint="done"></label>`).join('');
     $$('#layerTexts input').forEach((inp) => inp.addEventListener('input', () => {
@@ -699,6 +766,80 @@ function buildFontPicker() {
   loadFonts(group.fonts);
 }
 
+/* ---------------- layout: format, orientation, size & position ---------------- */
+$('#formatSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.value === state.format) return;
+  state.format = b.dataset.value;
+  selected = null;
+  update();
+});
+$('#orientSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  state.layout.one.orientation = b.dataset.value;
+  state.layout.one.size = null; // sizes differ between orientations; start from the default
+  update();
+});
+function layoutSummary() {
+  const L = lay();
+  const custom = L.size != null || L.offset != null;
+  return `${aspectOf(L.aspect).label}${custom ? ' · custom' : ''}`;
+}
+function buildLayoutSheet() {
+  const L = lay();
+  const geo = currentLayout();
+  $('#aspectList').replaceChildren(...ASPECTS.map((a) => {
+    const b = document.createElement('button');
+    b.className = 'aspect-row';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(L.aspect === a.id));
+    let w = a.w, h = a.h;
+    if (state.format === 'one') { const lw = Math.max(w, h), sh = Math.min(w, h); [w, h] = state.layout.one.orientation === 'portrait' ? [sh, lw] : [lw, sh]; }
+    const k = 30 / Math.max(w, h);
+    b.innerHTML = `<span class="shape"><i style="width:${w * k}px;height:${h * k}px"></i></span>
+      <span class="t"><b>${a.label}</b><small>${a.cameras}</small></span><span class="check">${icon('check')}</span>`;
+    b.addEventListener('click', () => { L.aspect = a.id; L.offset = null; update(); });
+    return b;
+  }));
+  $('#sizeRange').value = geo.size;
+  $('#sizeVal').textContent = `${Math.round(geo.size * 100)}% · ${geo.cards[0].win.w.toFixed(0)} × ${geo.cards[0].win.h.toFixed(0)} mm`;
+  $('#offsetRange').value = geo.offset;
+  const o = geo.offset;
+  $('#offsetVal').textContent = Math.abs(o) < 0.02 ? 'Centre' : `${Math.round(Math.abs(o) * 100)}% ${o < 0 ? 'up' : 'down'}`;
+  $('#layoutFoot').textContent = state.format === 'two'
+    ? 'Always centred left to right, so the sheet is still cut straight down the middle.'
+    : 'Always centred left to right on the sheet.';
+}
+/** Slider drags only redraw; the full rebuild happens when the drag ends. */
+function layoutLive() {
+  saveState();
+  buildSlots();
+  drawPreview();
+  const geo = currentLayout();
+  $('#sizeVal').textContent = `${Math.round(geo.size * 100)}% · ${geo.cards[0].win.w.toFixed(0)} × ${geo.cards[0].win.h.toFixed(0)} mm`;
+  const o = geo.offset;
+  $('#offsetVal').textContent = Math.abs(o) < 0.02 ? 'Centre' : `${Math.round(Math.abs(o) * 100)}% ${o < 0 ? 'up' : 'down'}`;
+}
+$('#sizeRange').addEventListener('input', (e) => {
+  const L = lay();
+  if (L.offset == null) L.offset = currentLayout().offset; // keep the photo where it is while resizing
+  L.size = Number(e.target.value);
+  layoutLive();
+});
+$('#offsetRange').addEventListener('input', (e) => {
+  let v = Number(e.target.value);
+  if (Math.abs(v) < 0.03) v = 0; // snap to the vertical centre
+  lay().offset = v;
+  layoutLive();
+});
+for (const id of ['#sizeRange', '#offsetRange']) $(id).addEventListener('change', update);
+$('#layoutReset').addEventListener('click', () => {
+  const L = lay();
+  L.aspect = FORMATS[state.format].aspect; L.size = null; L.offset = null;
+  update();
+});
+
 /* ---------------- paper ---------------- */
 function buildPaperList() {
   $('#paperValue').textContent = state.paperId;
@@ -719,12 +860,20 @@ function update() {
   const { paper } = currentLayout();
   sheetEl.style.setProperty('--ar', String(paper.w / paper.h));
   $('#marksToggle').checked = state.marks;
-  $('#sheetMeta').textContent = `${paper.id} · ${paper.kind} · cut down the middle`;
+  $('#marksRow').hidden = count() !== 2;
+  $$('#formatSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === state.format)));
+  $('#orientSeg').hidden = state.format !== 'one';
+  $$('#orientSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === state.layout.one.orientation)));
+  $('#layoutValue').textContent = layoutSummary();
+  $('#sheetMeta').textContent = state.format === 'two'
+    ? `${paper.id} · ${paper.kind} · cut down the middle`
+    : `${paper.id} · ${paper.kind} · one ${paper.portrait ? 'portrait' : 'landscape'} print`;
+  buildLayoutSheet();
   buildSwatches();
   buildPaperList();
   buildTemplateChips();
   buildLayerList();
-  $('#exportBtn').disabled = !(photos[0] || photos[1]);
+  $('#exportBtn').disabled = !photos.slice(0, count()).some(Boolean);
   buildSlots();
   buildPhotoList();
   drawPreview();
@@ -798,7 +947,7 @@ const fileInput = $('#fileInput');
 let pickTarget = null;
 function pickFiles(i) {
   pickTarget = i;
-  fileInput.multiple = i == null || (!photos[0] && !photos[1]);
+  fileInput.multiple = count() === 2 && (i == null || (!photos[0] && !photos[1]));
   fileInput.click();
 }
 fileInput.addEventListener('change', () => {

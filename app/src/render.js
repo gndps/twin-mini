@@ -49,7 +49,7 @@ export function renderSheet(ctx, layout, slots, opts) {
     if (slot.captions?.length) drawCaptions(ctx, card, slot.captions, color.ink);
   });
 
-  if (marks) drawCutHint(ctx, layout, scale);
+  if (marks && layout.cutX != null) drawCutHint(ctx, layout, scale);
   ctx.restore();
 }
 
