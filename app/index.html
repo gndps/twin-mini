@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Twin Mini — instant frames for SELPHY</title>
   <meta name="description" content="Turn one or two photos into an Instax-style framed print sheet for the Canon SELPHY CP1500. Runs entirely in your browser at full resolution.">
-  <meta name="theme-color" content="#F4F1EC">
+  <meta name="theme-color" content="#F5F3EF">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Twin Mini">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,184 +25,207 @@
         <path d="M14 21v5" class="bm-cut"/>
       </svg>
       <span class="brand-name">Twin Mini</span>
-      <span class="brand-tag">for Canon SELPHY</span>
     </a>
-    <nav class="topnav">
-      <button class="link-btn" data-open="help">How it works</button>
-      <button class="link-btn" data-open="tips">Print tips</button>
-    </nav>
+    <button class="icon-btn" data-open="help" aria-label="How it works" title="How it works">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M7.9 7.6a2.2 2.2 0 1 1 3 2.1c-.6.3-.9.7-.9 1.3v.5M10 14.2v.1"/></svg>
+    </button>
   </header>
 
   <main class="studio">
     <section class="stage" aria-label="Print sheet preview">
-      <div class="stage-head">
-        <div>
-          <h1 class="stage-title">Print sheet</h1>
-          <p class="stage-meta" id="sheetMeta">148 × 100 mm · two Instax Mini frames</p>
-        </div>
-        <div class="stage-toggles">
-        <label class="switch" title="Hairline cut line and corner ticks — printed only when on">
-          <input type="checkbox" id="marksToggle">
-          <span class="switch-track"><span class="switch-thumb"></span></span>
-          <span class="switch-label">Cut guides</span>
-        </label>
-        <label class="switch" title="Show the area a borderless print may trim (preview only)">
-          <input type="checkbox" id="safeToggle">
-          <span class="switch-track"><span class="switch-thumb"></span></span>
-          <span class="switch-label">Safe area</span>
-        </label>
-        </div>
-      </div>
-
       <div class="sheet-wrap" id="sheetWrap">
         <div class="sheet" id="sheet">
           <canvas id="preview" aria-hidden="true"></canvas>
           <div class="safe-area" id="safeArea" hidden></div>
           <div class="slots" id="slots"></div>
-          <button class="swap-btn" id="swapBtn" title="Swap photos" aria-label="Swap photos" hidden>
-            <svg viewBox="0 0 20 20"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>
-          </button>
         </div>
         <div class="drop-veil" id="dropVeil"><span>Drop photos to place them</span></div>
       </div>
-
-      <p class="stage-hint" id="stageHint">
-        Drop one or two photos, or tap a frame. Drag a photo to reposition it.
-      </p>
+      <p class="stage-meta" id="sheetMeta"></p>
     </section>
 
     <aside class="inspector" aria-label="Settings">
       <div class="inspector-scroll">
-        <section class="panel">
-          <h2 class="panel-title">Format</h2>
-          <div class="seg" role="radiogroup" id="layoutSeg">
-            <button role="radio" data-value="mini">
-              <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="6" y="3" width="11" height="18" rx="1"/><rect x="19" y="3" width="11" height="18" rx="1"/></svg>
-              Two Minis
-            </button>
-            <button role="radio" data-value="wide">
-              <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="5" y="4" width="26" height="16" rx="1"/></svg>
-              One Wide
+        <section class="group">
+          <div class="group-head">
+            <h2 class="group-title">Photos</h2>
+            <button class="text-btn" id="swapBtn" hidden>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>Swap
             </button>
           </div>
+          <div class="photo-list" id="photoList"></div>
         </section>
 
-        <section class="panel">
-          <h2 class="panel-title">Frame size</h2>
-          <div class="option-list" role="radiogroup" id="frameList"></div>
-          <div class="custom-fields" id="customFields" hidden>
-            <label>Photo width<input type="number" step="0.5" min="20" max="140" data-custom="winW"><span>mm</span></label>
-            <label>Top<input type="number" step="0.5" min="0" max="40" data-custom="top"><span>mm</span></label>
-            <label>Sides<input type="number" step="0.5" min="0" max="40" data-custom="side"><span>mm</span></label>
-            <label>Chin<input type="number" step="0.5" min="0" max="60" data-custom="chin"><span>mm</span></label>
-          </div>
-          <p class="note warn" id="fitWarn" hidden></p>
+        <section class="group">
+          <h2 class="group-title">Frame</h2>
+          <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
         </section>
 
-        <section class="panel">
-          <h2 class="panel-title">Frame color</h2>
-          <div class="swatches" role="radiogroup" id="swatches"></div>
-        </section>
-
-        <section class="panel">
-          <h2 class="panel-title">Caption <span class="opt">optional</span></h2>
+        <section class="group">
+          <h2 class="group-title">Caption</h2>
           <div class="captions" id="captions"></div>
-          <div class="seg seg-sm" role="radiogroup" id="fontSeg">
-            <button role="radio" data-value="hand" class="f-hand">Handwritten</button>
-            <button role="radio" data-value="serif" class="f-serif">Serif</button>
-            <button role="radio" data-value="sans" class="f-sans">Sans</button>
-          </div>
         </section>
 
-        <section class="panel">
-          <h2 class="panel-title">Paper &amp; guides</h2>
-          <div class="seg seg-sm" role="radiogroup" id="paperSeg">
-            <button role="radio" data-value="postcard">Postcard 148×100</button>
-            <button role="radio" data-value="4x6">4×6 in</button>
-          </div>
-          <label class="row-toggle" id="repeatRow">
-            <span>Repeat a single photo<small>Fill both frames when only one is added</small></span>
-            <span class="switch"><input type="checkbox" id="repeatToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
-          </label>
-        </section>
-
-        <section class="panel">
-          <h2 class="panel-title">Output</h2>
-          <div class="seg seg-sm" role="radiogroup" id="dpiSeg">
-            <button role="radio" data-value="auto">Auto</button>
-            <button role="radio" data-value="300">300 dpi</button>
-            <button role="radio" data-value="600">600</button>
-            <button role="radio" data-value="1200">1200</button>
-          </div>
-          <div class="seg seg-sm" role="radiogroup" id="formatSeg">
-            <button role="radio" data-value="png">PNG · lossless</button>
-            <button role="radio" data-value="jpeg">JPEG · smaller</button>
-          </div>
-          <p class="note" id="outInfo"></p>
-        </section>
+        <button class="row-link" data-open="advanced">
+          <span class="row-link-icon"><svg viewBox="0 0 20 20"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></svg></span>
+          <span class="row-link-text">Advanced<small id="advSummary"></small></span>
+          <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+        </button>
       </div>
 
       <div class="inspector-foot">
-        <button class="btn-primary" id="exportBtn" disabled>
-          <span>Create print file</span>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M5.5 8.5 10 13l4.5-4.5M4 16.5h12"/></svg>
-        </button>
+        <button class="btn-primary" id="exportBtn" disabled>Create print file</button>
       </div>
     </aside>
   </main>
 
   <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple hidden>
 
+  <!-- Advanced settings -->
+  <dialog class="sheet-modal" id="advanced" aria-labelledby="advTitle">
+    <div class="sheet-inner">
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <span></span>
+        <h2 id="advTitle">Advanced</h2>
+        <button class="done-btn" data-close>Done</button>
+      </header>
+      <div class="sheet-body">
+        <h3 class="list-label">Layout</h3>
+        <div class="list">
+          <div class="list-row stacked">
+            <span>Format</span>
+            <div class="seg" role="radiogroup" id="layoutSeg">
+              <button role="radio" data-value="mini">Two Minis</button>
+              <button role="radio" data-value="wide">One Wide</button>
+            </div>
+          </div>
+          <div class="list-row stacked">
+            <span>Frame size</span>
+            <div class="option-list" role="radiogroup" id="frameList"></div>
+            <div class="custom-fields" id="customFields" hidden>
+              <label>Photo width<input type="number" inputmode="decimal" step="0.5" min="20" max="140" data-custom="winW"><span>mm</span></label>
+              <label>Top<input type="number" inputmode="decimal" step="0.5" min="0" max="40" data-custom="top"><span>mm</span></label>
+              <label>Sides<input type="number" inputmode="decimal" step="0.5" min="0" max="40" data-custom="side"><span>mm</span></label>
+              <label>Chin<input type="number" inputmode="decimal" step="0.5" min="0" max="60" data-custom="chin"><span>mm</span></label>
+            </div>
+            <p class="note warn" id="fitWarn" hidden></p>
+          </div>
+        </div>
+
+        <h3 class="list-label">Caption</h3>
+        <div class="list">
+          <div class="list-row stacked">
+            <span>Font</span>
+            <div class="seg" role="radiogroup" id="fontSeg">
+              <button role="radio" data-value="hand" class="f-hand">Handwritten</button>
+              <button role="radio" data-value="serif" class="f-serif">Serif</button>
+              <button role="radio" data-value="sans" class="f-sans">Sans</button>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="list-label">Paper &amp; guides</h3>
+        <div class="list">
+          <div class="list-row stacked">
+            <span>Paper</span>
+            <div class="seg" role="radiogroup" id="paperSeg">
+              <button role="radio" data-value="postcard">Postcard 148×100</button>
+              <button role="radio" data-value="4x6">4×6 in</button>
+            </div>
+          </div>
+          <label class="list-row">
+            <span>Cut guides<small>Hairline centre line and corner ticks</small></span>
+            <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+          </label>
+          <label class="list-row">
+            <span>Show safe area<small>Preview only: what borderless may trim</small></span>
+            <span class="switch"><input type="checkbox" id="safeToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+          </label>
+          <label class="list-row" id="repeatRow">
+            <span>Repeat a single photo<small>Fill both frames with one photo</small></span>
+            <span class="switch"><input type="checkbox" id="repeatToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
+          </label>
+        </div>
+
+        <h3 class="list-label">Export</h3>
+        <div class="list">
+          <div class="list-row stacked">
+            <span>Resolution</span>
+            <div class="seg" role="radiogroup" id="dpiSeg">
+              <button role="radio" data-value="auto">Auto</button>
+              <button role="radio" data-value="300">300</button>
+              <button role="radio" data-value="600">600</button>
+              <button role="radio" data-value="1200">1200</button>
+            </div>
+          </div>
+          <div class="list-row stacked">
+            <span>File type</span>
+            <div class="seg" role="radiogroup" id="formatSeg">
+              <button role="radio" data-value="png">PNG</button>
+              <button role="radio" data-value="jpeg">JPEG</button>
+            </div>
+          </div>
+        </div>
+        <p class="list-foot" id="outInfo"></p>
+
+        <h3 class="list-label">Help</h3>
+        <div class="list">
+          <button class="list-row nav" data-open="tips"><span>Printing tips for SELPHY</span><svg class="chev" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></svg></button>
+          <button class="list-row nav danger" id="resetBtn"><span>Reset to defaults</span></button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Adjust photo -->
   <dialog class="modal modal-adjust" id="adjust" aria-labelledby="adjustTitle">
     <form method="dialog" class="modal-inner">
-      <header class="modal-head">
-        <h2 id="adjustTitle">Adjust photo</h2>
-        <button class="icon-btn" value="cancel" aria-label="Close"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+      <header class="sheet-head">
+        <button class="done-btn ghost" value="cancel">Cancel</button>
+        <h2 id="adjustTitle">Adjust</h2>
+        <button class="done-btn" value="done">Done</button>
       </header>
       <div class="adjust-body">
         <div class="adjust-stage" id="adjustStage"><canvas id="adjustCanvas"></canvas></div>
         <div class="adjust-controls">
           <div class="tool-row">
-            <button type="button" class="tool" data-rot="-90" title="Rotate left"><svg viewBox="0 0 20 20"><path d="M4 8a6.5 6.5 0 1 1 1.6 6.4"/><path d="M4 3.5V8h4.5"/></svg><span>Rotate left</span></button>
-            <button type="button" class="tool" data-rot="90" title="Rotate right"><svg viewBox="0 0 20 20"><path d="M16 8a6.5 6.5 0 1 0-1.6 6.4"/><path d="M16 3.5V8h-4.5"/></svg><span>Rotate right</span></button>
-            <button type="button" class="tool" data-rot="180" title="Turn upside down (180°)"><svg viewBox="0 0 20 20"><path d="M10 3v14M6 13l4 4 4-4M6 7l4-4 4 4"/></svg><span>Flip 180°</span></button>
+            <button type="button" class="tool" data-rot="-90"><svg viewBox="0 0 20 20"><path d="M4 8a6.5 6.5 0 1 1 1.6 6.4"/><path d="M4 3.5V8h4.5"/></svg><span>Turn left</span></button>
+            <button type="button" class="tool" data-rot="90"><svg viewBox="0 0 20 20"><path d="M16 8a6.5 6.5 0 1 0-1.6 6.4"/><path d="M16 3.5V8h-4.5"/></svg><span>Turn right</span></button>
+            <button type="button" class="tool" data-rot="180"><svg viewBox="0 0 20 20"><path d="M10 3v14M6 13l4 4 4-4M6 7l4-4 4 4"/></svg><span>Flip 180°</span></button>
+            <button type="button" class="tool" id="adjustReset"><svg viewBox="0 0 20 20"><path d="M4 10a6 6 0 1 0 2-4.5"/><path d="M4 3v3.5h3.5"/></svg><span>Reset</span></button>
           </div>
           <label class="zoom-row">
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5"/><path d="M13 13l4 4M7 9h4"/></svg>
             <input type="range" id="zoomRange" min="1" max="5" step="0.01" value="1" aria-label="Zoom">
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5"/><path d="M13 13l4 4M7 9h4M9 7v4"/></svg>
           </label>
-          <dl class="stats" id="adjustStats"></dl>
-          <p class="note">Drag the photo to choose what shows in the window. Rotation never mirrors your image.</p>
+          <p class="adjust-meta" id="adjustStats"></p>
         </div>
       </div>
-      <footer class="modal-foot">
-        <button type="button" class="btn-ghost" id="adjustReset">Reset</button>
-        <button class="btn-primary sm" value="done" autofocus>Done</button>
-      </footer>
     </form>
   </dialog>
 
   <!-- Export -->
   <dialog class="modal modal-export" id="exportDlg" aria-labelledby="exportTitle">
     <div class="modal-inner">
-      <header class="modal-head">
-        <h2 id="exportTitle">Your print file</h2>
-        <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <span></span>
+        <h2 id="exportTitle">Ready to print</h2>
+        <button class="done-btn" data-close>Done</button>
       </header>
       <div class="export-body">
         <div class="export-preview" id="exportPreview"><div class="spinner" aria-label="Rendering"></div></div>
         <div class="export-side">
-          <dl class="stats" id="exportStats"></dl>
+          <p class="export-meta" id="exportStats"></p>
           <div class="export-actions">
+            <button class="btn-primary" id="shareBtn" hidden>Share to SELPHY app</button>
             <a class="btn-primary" id="downloadLink" download aria-disabled="true">Download</a>
-            <button class="btn-ghost" id="shareBtn" hidden>Share to SELPHY app…</button>
           </div>
           <ol class="steps">
-            <li><b>Print</b> it on Postcard paper from SELPHY Photo Layout (borderless).</li>
-            <li><b>Cut</b> along the dashed centre line.</li>
-            <li><b>Trim</b> each card at the corner ticks. A corner rounder finishes the look.</li>
+            <li>Print on Postcard paper, borderless.</li>
+            <li>Cut along the centre line.</li>
           </ol>
         </div>
       </div>
@@ -210,32 +235,36 @@
   <!-- How it works -->
   <dialog class="modal modal-info" id="help" aria-labelledby="helpTitle">
     <div class="modal-inner">
-      <header class="modal-head">
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <span></span>
         <h2 id="helpTitle">How it works</h2>
-        <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+        <button class="done-btn" data-close>Done</button>
       </header>
       <ol class="how">
-        <li><span class="how-n">1</span><div><b>Add one or two photos.</b> Each is cropped to the Instax window (46 : 62) without stretching, at its full original resolution. Phone orientation is respected; rotate any photo in 90° steps.</div></li>
-        <li><span class="how-n">2</span><div><b>Pick a frame.</b> True Mini matches real film: 54 × 86 mm card, 46 × 62 mm photo, thick chin at the bottom. Both frames sit side by side on one 148 × 100 mm SELPHY postcard.</div></li>
-        <li><span class="how-n">3</span><div><b>Print, cut, trim.</b> Print borderless, cut down the dashed line, then trim at the corner ticks.</div></li>
+        <li><span class="how-n">1</span><div><b>Add one or two photos.</b> Each is cropped to the Instax window (46 : 62) from its full original resolution, never stretched. Phone orientation is respected; rotate any photo in 90° steps.</div></li>
+        <li><span class="how-n">2</span><div><b>Pick a frame colour</b> and, if you like, write a caption on the chin. Everything else lives in Advanced.</div></li>
+        <li><span class="how-n">3</span><div><b>Print and cut.</b> Print borderless on a SELPHY postcard and cut down the middle: two Instax-style prints.</div></li>
       </ol>
-      <p class="note">Nothing is uploaded. Your photos never leave this device; all rendering happens in the browser.</p>
+      <p class="note">Nothing is uploaded. Your photos never leave this device.</p>
     </div>
   </dialog>
 
   <!-- Print tips -->
   <dialog class="modal modal-info" id="tips" aria-labelledby="tipsTitle">
     <div class="modal-inner">
-      <header class="modal-head">
-        <h2 id="tipsTitle">Printing on the SELPHY CP1500</h2>
-        <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <span></span>
+        <h2 id="tipsTitle">Printing tips</h2>
+        <button class="done-btn" data-close>Done</button>
       </header>
       <ul class="tips">
-        <li><b>Paper.</b> Use Postcard size (KP-108IN, 100 × 148 mm). The file is laid out at exactly that size, so nothing is stretched.</li>
-        <li><b>Borderless.</b> Choose borderless. The printer trims a hair from every edge; the frames sit well inside that, and the cut line stays centred because the trim is symmetrical. Turn on <em>Safe area</em> to see it.</li>
-        <li><b>Turn off auto-correction.</b> Disable “Image optimize”/auto correction and red-eye in the app so frame colors stay true.</li>
-        <li><b>Resolution.</b> The CP1500 prints at 300 dpi. <em>Auto</em> keeps every pixel of your sharpest photo (up to 1200 dpi) so the printer does the final, single resample.</li>
-        <li><b>From a computer.</b> Print at 100% / “actual size” on Postcard paper, borderless.</li>
+        <li><b>Paper.</b> Postcard size (KP-108IN, 100 × 148 mm). The file is laid out at exactly that size.</li>
+        <li><b>Borderless.</b> The printer trims about 2 mm from every edge. Half sheet already places the photo inside that, so borders come out even.</li>
+        <li><b>No auto-correction.</b> Turn off “Image optimize” and red-eye correction in the SELPHY app so frame colours stay true.</li>
+        <li><b>Resolution.</b> The CP1500 prints at 300 dpi. Auto keeps every pixel of your sharpest photo (up to 1200 dpi) so the printer does a single, final resample.</li>
+        <li><b>From a computer.</b> Print at actual size on Postcard paper, borderless.</li>
       </ul>
     </div>
   </dialog>
