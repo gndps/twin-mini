@@ -1,4 +1,4 @@
-import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, CUSTOM_RATIO, aspectOf, windowRatio, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
+import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
 import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
 import { setJpegDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
@@ -21,10 +21,9 @@ const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.use
 const MAX_PIXELS = isSafari ? 16_777_216 : 120_000_000;
 const touchFirst = matchMedia('(hover: none)').matches;
 
-const presetRatio = (id) => { const a = aspectOf(id); return a ? a.w / a.h : 1; };
 // Each format keeps its own shape, size and position, saved independently.
 const defaultLayoutFor = (f) => ({
-  aspect: FORMATS[f].aspect, ratio: presetRatio(FORMATS[f].aspect), size: null, offset: null,
+  aspect: FORMATS[f].aspect, w: null, h: null, top: null,
   ...(f === 'one' ? { orientation: 'landscape', flip: true } : {}),
 });
 const defaultLayout = () => ({ two: defaultLayoutFor('two'), one: defaultLayoutFor('one') });
@@ -65,10 +64,9 @@ function loadState() {
     const L = saved.layout?.[f];
     if (!L) continue;
     if (L.aspect === 'custom' || aspectOf(L.aspect)) s.layout[f].aspect = L.aspect;
-    if (Number.isFinite(L.ratio)) s.layout[f].ratio = clamp(L.ratio, CUSTOM_RATIO.min, CUSTOM_RATIO.max);
     if (f === 'one' && typeof L.flip === 'boolean') s.layout.one.flip = L.flip;
-    if (Number.isFinite(L.size)) s.layout[f].size = clamp(L.size, 0.3, 1);
-    if (Number.isFinite(L.offset)) s.layout[f].offset = clamp(L.offset, -1, 1);
+    for (const k of ['w', 'h', 'top']) if (Number.isFinite(L[k])) s.layout[f][k] = clamp(L[k], 0, 1);
+    if (s.layout[f].aspect === 'custom' && (s.layout[f].w == null || s.layout[f].h == null)) s.layout[f].aspect = FORMATS[f].aspect;
     if (f === 'one' && (L.orientation === 'portrait' || L.orientation === 'landscape')) s.layout.one.orientation = L.orientation;
   }
   const layers = sanitizeLayers(saved.layers);
@@ -719,6 +717,8 @@ function fillLayerDialog() {
   $('#layerFontName').style.fontFamily = fontCss(l.font);
   $('#layerSize').value = l.size;
   $('#layerSizeVal').textContent = `${l.size.toFixed(1)} mm`;
+  $('#layerShift').value = l.shift || 0;
+  $('#layerShiftVal').textContent = shiftLabel(l.shift || 0);
   $('#layerColors').replaceChildren(...CAPTION_COLORS.map((c) => {
     const b = document.createElement('button');
     b.setAttribute('role', 'radio');
@@ -739,6 +739,18 @@ $('#layerSame').addEventListener('change', (e) => {
   l.same = e.target.checked;
   captionsChanged({ rebuildList: true });
   fillLayerDialog();
+});
+function shiftLabel(v) {
+  if (Math.abs(v) < 0.25) return 'Centred';
+  return `${Math.abs(v).toFixed(1)} mm ${v < 0 ? 'closer' : 'further'}`;
+}
+$('#layerShift').addEventListener('input', (e) => {
+  const l = layerById(editId);
+  let v = Number(e.target.value);
+  if (Math.abs(v) < 0.4) v = 0; // snap to centred
+  l.shift = v;
+  $('#layerShiftVal').textContent = shiftLabel(v);
+  captionsChanged();
 });
 $('#layerSize').addEventListener('input', (e) => {
   const l = layerById(editId);
@@ -821,22 +833,23 @@ $('#orientSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   state.layout.one.orientation = b.dataset.value;
-  state.layout.one.size = null; // sizes differ between orientations; start from the default
+  Object.assign(state.layout.one, { w: null, h: null, top: null }); // sizes differ between orientations; start from the default
   update();
 });
-const fmtRatio = (r) => (r < 1 ? `1 : ${(1 / r).toFixed(2)}` : `${r.toFixed(2)} : 1`);
-// Ratio slider is logarithmic so tall and wide shapes get equal travel.
-const LOG_SPAN = Math.log(CUSTOM_RATIO.max / CUSTOM_RATIO.min);
-const ratioToT = (r) => Math.log(r / CUSTOM_RATIO.min) / LOG_SPAN;
-const tToRatio = (t) => CUSTOM_RATIO.min * Math.exp(t * LOG_SPAN);
 const flipActive = () => state.format === 'one' && state.layout.one.orientation === 'landscape' && state.layout.one.flip !== false;
+const fmtRatio = (r) => {
+  const pick = ASPECTS.flatMap((a) => [[a.w, a.h], [a.h, a.w]]).find(([w, h]) => Math.abs(w / h - r) < 0.01);
+  if (pick) return pick[0] > 10 ? `${pick[0]} : ${pick[1]}` : `${+pick[0].toFixed(1)} : ${+pick[1].toFixed(1)}`;
+  return r < 1 ? `1 : ${(1 / r).toFixed(2)}` : `${r.toFixed(2)} : 1`;
+};
+const mm = (v) => `${v.toFixed(1)} mm`;
 
 function layoutSummary() {
   const L = lay();
-  const name = L.aspect === 'custom' ? `Custom ${fmtRatio(windowRatio({ format: state.format, ...L }))}` : aspectOf(L.aspect)?.label;
-  return `${name}${flipActive() ? ' · rotated' : ''}${L.size != null || L.offset != null ? ' · custom fit' : ''}`;
+  const geo = currentLayout();
+  const name = L.aspect === 'custom' ? `Custom ${fmtRatio(geo.ratio)}` : aspectOf(L.aspect)?.label;
+  return `${name}${flipActive() && L.aspect !== 'custom' ? ' · rotated' : ''}${L.w != null || L.top != null ? ' · custom fit' : ''}`;
 }
-function baseRatio(L) { return L.aspect === 'custom' ? L.ratio : presetRatio(L.aspect); }
 function buildLayoutSheet() {
   const L = lay();
   const flipped = flipActive();
@@ -849,11 +862,10 @@ function buildLayoutSheet() {
     const k = 30 / Math.max(w, h);
     const label = flipped && a.label.includes(':') ? a.label.split(' : ').reverse().join(' : ') : a.label;
     b.innerHTML = `<span class="shape"><i style="width:${w * k}px;height:${h * k}px"></i></span><b>${label}</b><small>${a.cameras}</small>`;
-    b.addEventListener('click', () => { L.aspect = a.id; L.ratio = a.w / a.h; L.offset = null; update(); });
+    // A preset keeps the current width and top border; its shape sets the height.
+    b.addEventListener('click', () => { L.aspect = a.id; L.h = null; update(); });
     return b;
   }));
-  $('#ratioRange').value = ratioToT(baseRatio(L));
-  $('#ratioVal').textContent = L.aspect === 'custom' ? `Custom · ${fmtRatio(windowRatio({ format: state.format, ...L }))}` : fmtRatio(windowRatio({ format: state.format, ...L }));
   $('#flipRow').hidden = !(state.format === 'one' && L.orientation === 'landscape');
   $('#flipToggle').checked = L.flip !== false;
   $('#layoutFoot').textContent = state.format === 'two'
@@ -864,12 +876,16 @@ function buildLayoutSheet() {
 }
 function fitLabels() {
   const geo = currentLayout();
-  const win = geo.cards[0].win;
-  $('#sizeRange').value = geo.size;
-  $('#sizeVal').textContent = `${Math.round(geo.size * 100)}% · ${win.w.toFixed(0)} × ${win.h.toFixed(0)} mm`;
-  $('#offsetRange').value = geo.offset;
-  const o = geo.offset;
-  $('#offsetVal').textContent = Math.abs(o) < 0.02 ? 'Centre' : `${Math.round(Math.abs(o) * 100)}% ${o < 0 ? 'up' : 'down'}`;
+  const { win } = geo.cards[0];
+  $('#widthRange').value = geo.w;
+  $('#widthVal').textContent = mm(win.w);
+  $('#heightRange').max = String(Math.max(0.08, 1 - geo.top));
+  $('#heightRange').value = geo.h;
+  $('#heightVal').textContent = mm(win.h);
+  $('#topRange').max = String(Math.max(0, 1 - geo.h));
+  $('#topRange').value = geo.top;
+  $('#topVal').textContent = mm(win.y);
+  $('#shapeNote').textContent = lay().aspect === 'custom' ? `· custom ${fmtRatio(geo.ratio)}` : '';
 }
 /** One frame, large, inside the sheet: the photo being sized (or the first one added). */
 function drawLayoutPreview() {
@@ -901,29 +917,40 @@ function layoutLive() {
   drawLayoutPreview();
   $('#layoutValue').textContent = layoutSummary();
 }
-$('#sizeRange').addEventListener('input', (e) => {
+/** Pin the current geometry so one slider never moves what the others control. */
+function pin(L, geo) {
+  if (L.w == null) L.w = geo.w;
+  if (L.top == null) L.top = geo.top;
+}
+$('#widthRange').addEventListener('input', (e) => {
   const L = lay();
-  if (L.offset == null) L.offset = currentLayout().offset; // keep the photo where it is while resizing
-  L.size = Number(e.target.value);
+  const geo = currentLayout();
+  pin(L, geo);
+  if (L.aspect === 'custom' && L.h == null) L.h = geo.h;
+  L.w = Number(e.target.value);
   layoutLive();
 });
-$('#offsetRange').addEventListener('input', (e) => {
-  let v = Number(e.target.value);
-  if (Math.abs(v) < 0.03) v = 0; // snap to the vertical centre
-  lay().offset = v;
-  layoutLive();
-});
-$('#ratioRange').addEventListener('input', (e) => {
+$('#heightRange').addEventListener('input', (e) => {
   const L = lay();
-  if (L.offset == null) L.offset = currentLayout().offset;
-  L.aspect = 'custom';
-  L.ratio = tToRatio(Number(e.target.value));
-  $$('#aspectList .aspect-tile').forEach((t) => t.setAttribute('aria-checked', 'false'));
-  $('#ratioVal').textContent = `Custom · ${fmtRatio(windowRatio({ format: state.format, ...L }))}`;
+  const geo = currentLayout();
+  pin(L, geo);
+  if (L.aspect !== 'custom') {
+    L.aspect = 'custom';
+    $$('#aspectList .aspect-tile').forEach((t) => t.setAttribute('aria-checked', 'false'));
+  }
+  L.h = Number(e.target.value);
   layoutLive();
 });
-for (const id of ['#sizeRange', '#offsetRange', '#ratioRange']) $(id).addEventListener('change', update);
-$('#flipToggle').addEventListener('change', (e) => { lay().flip = e.target.checked; lay().offset = null; update(); });
+$('#topRange').addEventListener('input', (e) => {
+  const L = lay();
+  const geo = currentLayout();
+  pin(L, geo);
+  if (L.aspect === 'custom' && L.h == null) L.h = geo.h;
+  L.top = Number(e.target.value);
+  layoutLive();
+});
+for (const id of ['#widthRange', '#heightRange', '#topRange']) $(id).addEventListener('change', update);
+$('#flipToggle').addEventListener('change', (e) => { lay().flip = e.target.checked; update(); });
 $('#layoutReset').addEventListener('click', () => {
   const keepOrientation = lay().orientation;
   state.layout[state.format] = { ...defaultLayoutFor(state.format), ...(keepOrientation ? { orientation: keepOrientation } : {}) };

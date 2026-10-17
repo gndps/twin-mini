@@ -2,6 +2,9 @@
 // Pure data + formatting; no DOM.
 
 export const EDGES = ['bottom', 'top', 'left', 'right'];
+// Caption distance from its centred spot in the border, in mm: negative moves toward the photo
+// (and can overlap it), positive moves away.
+export const SHIFT = { min: -15, max: 15 };
 export const ALIGNS = ['start', 'center', 'end'];
 
 export const CAPTION_COLORS = [
@@ -79,11 +82,11 @@ const uid = () => `c${Date.now().toString(36)}${(seq++).toString(36)}`;
 
 /** A date/time caption: by default the photo's own timestamp (EXIF capture time, else file time). */
 export function dateLayer(over = {}) {
-  return { id: uid(), kind: 'date', dateFormat: 'dots', source: 'photo', font: 'Caveat', size: 4.6, edge: 'bottom', align: 'end', color: 'auto', ...over };
+  return { id: uid(), kind: 'date', dateFormat: 'dots', source: 'photo', font: 'Caveat', size: 4.6, edge: 'bottom', align: 'end', color: 'auto', shift: 0, ...over };
 }
 /** A free-text caption; by default each photo gets its own text. */
 export function textLayer(over = {}) {
-  return { id: uid(), kind: 'text', same: false, text: '', texts: ['', ''], font: 'Caveat', size: 6, edge: 'bottom', align: 'center', color: 'auto', ...over };
+  return { id: uid(), kind: 'text', same: false, text: '', texts: ['', ''], font: 'Caveat', size: 6, edge: 'bottom', align: 'center', color: 'auto', shift: 0, ...over };
 }
 
 export const BUILTIN_TEMPLATES = [
@@ -125,6 +128,7 @@ export function sanitizeLayers(layers) {
     edge: EDGES.includes(l.edge) ? l.edge : 'bottom',
     align: ALIGNS.includes(l.align) ? l.align : 'center',
     size: Number.isFinite(l.size) ? Math.min(14, Math.max(1.5, l.size)) : 4.5,
+    shift: Number.isFinite(l.shift) ? Math.min(SHIFT.max, Math.max(SHIFT.min, l.shift)) : 0,
     ...(l.kind === 'date' ? {
       dateFormat: DATE_FORMATS[l.dateFormat] ? l.dateFormat : 'dots',
       source: l.source === 'now' ? 'now' : 'photo',
@@ -135,10 +139,10 @@ export function sanitizeLayers(layers) {
 /* ---------------- template text format (export / import / site templates) ---------------- */
 // One template:  {"twinmini":"caption-template","version":1,"name":"…","captions":[…]}
 // Several: an array of those, or {"templates":[…]}. Caption fields: kind ("date" | "text"),
-// font, size (mm), edge, align, color, dateFormat + source ("photo" | "now") (date),
+// font, size (mm), edge, align, color, shift (mm, − = toward the photo), dateFormat + source ("photo" | "now") (date),
 // same/text/texts (text).
 export const TEMPLATE_FORMAT = 'caption-template';
-const KEEP = ['kind', 'font', 'size', 'edge', 'align', 'color', 'dateFormat', 'source', 'same', 'text', 'texts'];
+const KEEP = ['kind', 'font', 'size', 'edge', 'align', 'color', 'shift', 'dateFormat', 'source', 'same', 'text', 'texts'];
 
 export function templateToJson(name, layers) {
   return {

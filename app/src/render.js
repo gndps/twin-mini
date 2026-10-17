@@ -82,7 +82,8 @@ function drawPhoto(ctx, photo, win, scale, sourceFor) {
 const LINE = 1.22; // line height as a multiple of the font size
 
 /**
- * Captions are grouped by edge and stacked in reading order, centred across the border band.
+ * Captions are grouped by edge and stacked in reading order, centred across the border band,
+ * then nudged by their own `shift` (mm) toward the photo (may overlap it) or away from it.
  * Along the edge they align to the photo window (start / centre / end), like hand-written
  * notes on real film. Side captions are rotated: the left reads upwards, the right downwards.
  */
@@ -105,16 +106,19 @@ function drawCaptions(ctx, card, captions, autoInk) {
     } else {
       ctx.translate(win.x + win.w / 2, band.y + band.h / 2);
     }
+    // +1 means "away from the photo" along the local y axis of this edge.
+    const away = edge === 'bottom' ? 1 : -1;
     let y = -(total * k) / 2;
     for (const l of lines) {
       const size = l.size * k;
       const lh = size * LINE;
+      const dy = away * (l.shift || 0);
       ctx.font = `${size}px ${fontCss(l.font)}`;
       ctx.fillStyle = CAPTION_COLORS.find((c) => c.id === l.color)?.value || autoInk;
       ctx.textBaseline = 'middle';
       ctx.textAlign = l.align === 'start' ? 'left' : l.align === 'end' ? 'right' : 'center';
       const x = l.align === 'start' ? -length / 2 : l.align === 'end' ? length / 2 : 0;
-      ctx.fillText(fit(ctx, l.text, length), x, y + lh / 2);
+      ctx.fillText(fit(ctx, l.text, length), x, y + lh / 2 + dy);
       y += lh;
     }
     ctx.restore();
