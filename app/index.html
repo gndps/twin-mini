@@ -139,25 +139,23 @@
       <div class="sheet-body">
         <div class="card">
           <div class="list-row stacked">
-            <span class="row-split"><span>Size</span><span class="row-value" id="sizeVal"></span></span>
-            <input type="range" id="sizeRange" min="0.3" max="1" step="0.005" aria-label="Photo size">
+            <span class="row-split"><span>Width</span><span class="row-value" id="widthVal"></span></span>
+            <input type="range" id="widthRange" min="0.15" max="1" step="0.002" aria-label="Photo width">
           </div>
           <div class="list-row stacked">
-            <span class="row-split"><span>Position</span><span class="row-value" id="offsetVal"></span></span>
-            <input type="range" id="offsetRange" min="-1" max="1" step="0.01" aria-label="Vertical position">
-            <span class="range-ends"><span>Up</span><span>Centre</span><span>Down</span></span>
+            <span class="row-split"><span>Height</span><span class="row-value" id="heightVal"></span></span>
+            <input type="range" id="heightRange" min="0.08" max="1" step="0.002" aria-label="Photo height">
+          </div>
+          <div class="list-row stacked">
+            <span class="row-split"><span>Top border</span><span class="row-value" id="topVal"></span></span>
+            <input type="range" id="topRange" min="0" max="0.5" step="0.002" aria-label="Top border">
           </div>
         </div>
         <p class="list-foot" id="layoutFoot">Always centred left to right, so the sheet is still cut straight down the middle.</p>
 
-        <h3 class="list-label">Shape</h3>
+        <h3 class="list-label">Shape <span id="shapeNote"></span></h3>
         <div class="card">
           <div class="aspect-grid" id="aspectList" role="radiogroup" aria-label="Photo shape"></div>
-          <div class="list-row stacked">
-            <span class="row-split"><span>Ratio</span><span class="row-value" id="ratioVal"></span></span>
-            <input type="range" id="ratioRange" min="0" max="1" step="0.001" aria-label="Custom aspect ratio">
-            <span class="range-ends"><span>Taller</span><span></span><span>Wider</span></span>
-          </div>
           <label class="list-row" id="flipRow">
             <span>Rotate shape<small>Turn the photo window on its side</small></span>
             <span class="switch"><input type="checkbox" id="flipToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
@@ -225,6 +223,11 @@
               <button role="radio" data-value="left">Left</button>
               <button role="radio" data-value="right">Right</button>
             </div>
+          </div>
+          <div class="list-row stacked">
+            <span class="row-split"><span>Distance</span><span class="row-value" id="layerShiftVal"></span></span>
+            <input type="range" id="layerShift" min="-15" max="15" step="0.1" aria-label="Distance from the photo">
+            <span class="range-ends"><span>Over the photo</span><span>Centred</span><span>Further</span></span>
           </div>
           <div class="list-row stacked">
             <span>Alignment</span>
