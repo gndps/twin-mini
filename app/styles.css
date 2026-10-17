@@ -364,7 +364,7 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
   .studio { display: block; padding: 0; }
   .stage { padding: 4px 16px 0; }
   .sheet-wrap { padding: 8px 0 12px; min-height: 0; container-type: inline-size; }
-  .sheet { width: 100%; }
+  .sheet { width: min(100%, 54dvh * var(--ar)); }
   .drop-veil { display: none; }
   .inspector { padding: 14px 16px 0; }
   .inspector-scroll { overflow: visible; gap: 20px; }
@@ -476,3 +476,35 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
 .paper-row span { flex: 1; }
 .paper-row b { font-weight: 600; font-size: 16px; }
 .paper-row small { display: block; color: var(--muted); font-size: 13px; }
+
+/* ---------- Layout ---------- */
+.seg-lg button { min-height: 52px; font-size: 15px; gap: 10px; }
+.seg-lg button svg { width: 34px; height: 24px; stroke-width: 1.2; }
+.seg-lg button[aria-checked="true"] svg path { fill: var(--accent); fill-opacity: .35; stroke: none; }
+#formatSeg + .seg { margin-top: 2px; }
+.range-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: -4px; }
+.aspect-row { display: flex; align-items: center; gap: 14px; width: 100%; border: 0; background: none; padding: 10px 16px; min-height: 56px; text-align: left; }
+.aspect-row + .aspect-row { border-top: 0.5px solid var(--sep); }
+.aspect-row .shape { width: 34px; height: 34px; flex: none; display: grid; place-items: center; }
+.aspect-row .shape i { display: block; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--ink-2); border-radius: 1px; }
+.aspect-row[aria-checked="true"] .shape i { background: rgba(217, 105, 76, .3); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.aspect-row span.t { flex: 1; }
+.aspect-row b { font-weight: 600; font-size: 15px; display: block; }
+.aspect-row small { color: var(--muted); font-size: 13px; }
+.aspect-row .check { width: 20px; height: 20px; color: var(--accent); opacity: 0; flex: none; }
+.aspect-row[aria-checked="true"] .check { opacity: 1; }
+@media (max-width: 860px) {
+  /* keep the sheet visible above the layout sheet while adjusting */
+  .sheet-modal.compact { max-height: 58dvh; }
+  .sheet-modal.compact::backdrop { background: transparent; }
+}
+
+.import-box { padding: 10px 12px 6px; }
+.import-box textarea {
+  width: 100%; border: 0; background: var(--surface); border-radius: 10px; padding: 10px 12px; resize: vertical;
+  font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); min-height: 88px;
+}
+.import-box textarea:focus { outline: 2px solid var(--ink); outline-offset: -1px; }
+.import-actions { display: flex; justify-content: flex-end; }
+.list-foot code { font-size: 12px; background: var(--card); padding: 1px 5px; border-radius: 4px; }
+.tpl-row .exp { color: var(--ink-2); }

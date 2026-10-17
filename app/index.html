@@ -46,6 +46,33 @@
     <aside class="inspector" aria-label="Settings">
       <div class="inspector-scroll">
         <section class="group">
+          <h2 class="group-title">Layout</h2>
+          <div class="card">
+            <div class="list-row stacked">
+              <div class="seg seg-lg" role="radiogroup" aria-label="Format" id="formatSeg">
+                <button role="radio" data-value="two">
+                  <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="5" y="3" width="12" height="18" rx="1"/><rect x="19" y="3" width="12" height="18" rx="1"/><path d="M8 6h6v8H8zM22 6h6v8h-6z"/></svg>
+                  Two Minis
+                </button>
+                <button role="radio" data-value="one">
+                  <svg viewBox="0 0 36 24" aria-hidden="true"><rect x="4" y="3" width="28" height="18" rx="1"/><path d="M8 6h20v10H8z"/></svg>
+                  One Wide
+                </button>
+              </div>
+              <div class="seg" role="radiogroup" aria-label="Orientation" id="orientSeg">
+                <button role="radio" data-value="landscape">Landscape</button>
+                <button role="radio" data-value="portrait">Portrait</button>
+              </div>
+            </div>
+            <button class="list-row nav" data-open="layoutDlg">
+              <span>Photo size &amp; position</span>
+              <span class="row-value" id="layoutValue"></span>
+              <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <section class="group">
           <div class="group-head">
             <h2 class="group-title">Photos</h2>
             <button class="text-btn" id="swapBtn" hidden>
@@ -59,7 +86,7 @@
           <h2 class="group-title">Frame</h2>
           <div class="card">
             <div class="swatches" role="radiogroup" aria-label="Frame color" id="swatches"></div>
-            <label class="list-row">
+            <label class="list-row" id="marksRow">
               <span>Cut guide<small>A faint hint at the top and bottom of the centre line</small></span>
               <span class="switch"><input type="checkbox" id="marksToggle"><span class="switch-track"><span class="switch-thumb"></span></span></span>
             </label>
@@ -98,6 +125,35 @@
   </main>
 
   <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple hidden>
+
+  <!-- Photo size & position -->
+  <dialog class="sheet-modal compact" id="layoutDlg" aria-labelledby="layoutTitle">
+    <div class="sheet-inner">
+      <header class="sheet-head">
+        <span class="grabber" aria-hidden="true"></span>
+        <button class="done-btn ghost" id="layoutReset">Reset</button>
+        <h2 id="layoutTitle">Photo size &amp; position</h2>
+        <button class="done-btn" data-close>Done</button>
+      </header>
+      <div class="sheet-body">
+        <div class="card">
+          <div class="list-row stacked">
+            <span class="row-split"><span>Size</span><span class="row-value" id="sizeVal"></span></span>
+            <input type="range" id="sizeRange" min="0.3" max="1" step="0.005" aria-label="Photo size">
+          </div>
+          <div class="list-row stacked">
+            <span class="row-split"><span>Position</span><span class="row-value" id="offsetVal"></span></span>
+            <input type="range" id="offsetRange" min="-1" max="1" step="0.01" aria-label="Vertical position" list="offsetTicks">
+            <datalist id="offsetTicks"><option value="0"></option></datalist>
+            <span class="range-ends"><span>Up</span><span>Centre</span><span>Down</span></span>
+          </div>
+        </div>
+        <p class="list-foot" id="layoutFoot">Always centred left to right, so the sheet is still cut straight down the middle.</p>
+        <h3 class="list-label">Photo shape</h3>
+        <div class="card" id="aspectList" role="radiogroup" aria-label="Photo shape"></div>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Caption style -->
   <dialog class="sheet-modal" id="layerDlg" aria-labelledby="layerTitle">
@@ -196,6 +252,18 @@
         <h3 class="list-label">Your templates</h3>
         <div class="card" id="tplList"></div>
         <p class="list-foot">Saved on this device. They stay until you delete them.</p>
+
+        <h3 class="list-label">Share as text</h3>
+        <div class="card">
+          <button class="list-row nav" id="copyCurrent"><span>Copy current captions</span></button>
+          <button class="list-row nav" id="copyAll"><span>Copy all my templates</span></button>
+        </div>
+        <h3 class="list-label">Import</h3>
+        <form class="card import-box" id="importForm">
+          <textarea id="importText" rows="4" spellcheck="false" placeholder='Paste template text, e.g. {"twinmini":"caption-template", …}' required></textarea>
+          <div class="import-actions"><button class="done-btn" type="submit">Import</button></div>
+        </form>
+        <p class="list-foot">The same text works in <code>app/templates.json</code> to ship templates with the site.</p>
       </div>
     </div>
   </dialog>
