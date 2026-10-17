@@ -173,28 +173,34 @@ export function migrateDate(date, legacyLayers) {
 }
 
 /* ---------------- template text format (export / import / site templates) ---------------- */
-// One template:  {"twinmini":"caption-template","version":2,"name":"…","captions":[…],"date":{…}}
-// Several: an array of those, or {"templates":[…]}.
+// A template is a whole theme:
+//   {"twinmini":"theme","version":3,"name":"…","look":{…},"captions":[…],"date":{…}}
+// Several: an array of those, or {"templates":[…]}. Older caption-only templates (version 1–2,
+// no "look") still import and only change the captions and date.
+// Look fields: format ("two" | "one"), layout {two, one} (aspect, w, h, top; one also has
+//   orientation and flip), color (frame colour id), marks (cut guide), paperId, customPaper {w, h}.
 // Caption fields: font, size (mm), edge, align, color, shift (mm, − = toward the photo),
 //   ref (border thickness in mm when shift was set; anchors the caption, see effectiveShift),
 //   same + text, or texts (one per photo).
 // Date fields: on, source ("photo" | "now"), the same style fields, and fmt:
 //   { show, order, month, year, sep, weekday, clock, seconds } (see DATE_OPTIONS).
-export const TEMPLATE_FORMAT = 'caption-template';
+export const TEMPLATE_FORMAT = 'theme';
 const STYLE_KEYS = ['font', 'size', 'edge', 'align', 'color', 'shift', 'ref'];
 
-export function templateToJson(name, layers, date) {
+export function templateToJson(name, layers, date, look) {
   const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
   return {
-    twinmini: TEMPLATE_FORMAT, version: 2, name,
+    twinmini: TEMPLATE_FORMAT, version: 3, name,
+    ...(look ? { look: JSON.parse(JSON.stringify(look)) } : {}),
     captions: layers.map((l) => ({ kind: 'text', ...pick(l, [...STYLE_KEYS, 'same', 'text', 'texts']) })),
     date: date ? { on: !!date.on, source: date.source, ...pick(date, STYLE_KEYS), fmt: { ...date.fmt } } : { on: false },
   };
 }
 export const exportTemplatesText = (list) =>
-  JSON.stringify(list.length === 1 ? templateToJson(list[0].name, list[0].layers, list[0].date) : list.map((t) => templateToJson(t.name, t.layers, t.date)), null, 2);
+  JSON.stringify(list.length === 1 ? templateToJson(list[0].name, list[0].layers, list[0].date, list[0].look) : list.map((t) => templateToJson(t.name, t.layers, t.date, t.look)), null, 2);
 
-/** Parse exported text back into [{name, layers, date}]; throws a readable Error on bad input. */
+/** Parse exported text back into [{name, layers, date, look}]; throws a readable Error on bad input.
+ *  `look` is passed through raw (null for caption-only templates); the app validates it. */
 export function parseTemplatesText(text) {
   let data;
   try { data = JSON.parse(String(text).trim()); } catch { throw new Error('That isn’t template text (invalid JSON).'); }
@@ -205,6 +211,7 @@ export function parseTemplatesText(text) {
       name: String(t.name || 'Imported').slice(0, 30),
       layers: sanitizeLayers(t.captions),
       date: migrateDate(t.date, t.captions) || dateSettings({ on: false }),
+      look: t.look && typeof t.look === 'object' && !Array.isArray(t.look) ? t.look : null,
     };
   });
   if (!out.length) throw new Error('No templates found.');

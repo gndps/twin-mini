@@ -80,6 +80,7 @@ function drawPhoto(ctx, photo, win, scale, sourceFor) {
 }
 
 const LINE = 1.22; // line height as a multiple of the font size
+const EDGE_MARGIN = 2.5; // mm kept clear between a caption and the card's edge
 
 /**
  * Captions are grouped by edge and stacked in reading order, centred across the border band,
@@ -96,9 +97,13 @@ function drawCaptions(ctx, card, captions, autoInk, hits) {
     const band = edge === 'bottom' ? card.chin : edge === 'top' ? card.top : card[edge];
     const vertical = edge === 'left' || edge === 'right';
     const across = vertical ? band.w : band.h;          // room across the band
-    const length = vertical ? win.h : win.w;             // room along the edge
+    const length = vertical ? win.h : win.w;             // the photo's side along the edge
+    // How far text may run from the photo's centre along this edge before reaching the card's
+    // edge (less a small margin): captions anchor to the photo but can run into the side borders.
+    const mid = vertical ? win.y + win.h / 2 : win.x + win.w / 2;
+    const half = vertical ? Math.min(mid - card.y, card.y + card.h - mid) : Math.min(mid - card.x, card.x + card.w - mid);
+    const reach = Math.max(length / 2, half - EDGE_MARGIN);
     const total = lines.reduce((s, l) => s + l.size * LINE, 0);
-    const k = total > across * 0.92 ? (across * 0.92) / total : 1; // shrink to fit the band
 
     ctx.save();
     if (vertical) {
@@ -109,17 +114,19 @@ function drawCaptions(ctx, card, captions, autoInk, hits) {
     }
     // +1 means "away from the photo" along the local y axis of this edge.
     const away = edge === 'bottom' ? 1 : -1;
-    let y = -(total * k) / 2;
+    // The chosen size is always kept; a caption larger than its border may overlap the photo.
+    let y = -total / 2;
     for (const l of lines) {
-      let size = l.size * k;
+      let size = l.size;
       const lh = size * LINE;
       const dy = away * effectiveShift(l, across);
       ctx.font = `${size}px ${fontCss(l.font)}`;
-      // Too long for the edge: shrink this line to fit (down to 35 % of its size), so the
+      // Too long for the card: shrink this line to fit (down to 35 % of its size), so the
       // whole caption prints instead of being cut off; only past that is it shortened with "…".
+      const room = l.align === 'center' ? 2 * reach : length / 2 + reach;
       const wide = l.text ? ctx.measureText(l.text).width : 0;
-      if (wide > length) {
-        size = Math.max(size * 0.35, size * (length / wide) * 0.98);
+      if (wide > room) {
+        size = Math.max(size * 0.35, size * (room / wide) * 0.98);
         ctx.font = `${size}px ${fontCss(l.font)}`;
       }
       ctx.fillStyle = CAPTION_COLORS.find((c) => c.id === l.color)?.value || autoInk;
@@ -129,7 +136,7 @@ function drawCaptions(ctx, card, captions, autoInk, hits) {
       const cy = y + lh / 2 + dy;
       // Captions being edited in place (or still empty) are drawn by the overlay instead.
       const skipped = hits?.skip && hits.skip.id === l.id && hits.skip.card === hits.card;
-      if (l.text && !skipped) ctx.fillText(fit(ctx, l.text, length), x, cy);
+      if (l.text && !skipped) ctx.fillText(fit(ctx, l.text, room), x, cy);
       if (hits) {
         // Where this line sits on the sheet (mm), so an editor can be laid exactly over it.
         const m = ctx.getTransform();

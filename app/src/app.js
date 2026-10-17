@@ -50,16 +50,12 @@ function readJson(key) {
 function writeJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
 }
-function loadState() {
-  const s = defaults();
-  const saved = readJson(STATE_KEY);
-  if (!saved) return s;
+/** Copy the valid look settings (frame, layout, paper) from `saved` onto `s`. */
+function readLook(s, saved) {
   if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
   if (typeof saved.marks === 'boolean') s.marks = saved.marks;
   if (PAPERS[saved.paperId] || OTHER_PAPERS[saved.paperId] || saved.paperId === 'custom') s.paperId = saved.paperId;
-  if (['frame', 'captions', 'paper'].includes(saved.tab)) s.tab = saved.tab;
   if (Number.isFinite(saved.customPaper?.w) && Number.isFinite(saved.customPaper?.h)) s.customPaper = { w: saved.customPaper.w, h: saved.customPaper.h };
-  // Every session opens on Two Minis; any custom size/position is kept.
   for (const f of ['two', 'one']) {
     const L = saved.layout?.[f];
     if (!L) continue;
@@ -69,6 +65,19 @@ function loadState() {
     if (s.layout[f].aspect === 'custom' && (s.layout[f].w == null || s.layout[f].h == null)) s.layout[f].aspect = FORMATS[f].aspect;
     if (f === 'one' && (L.orientation === 'portrait' || L.orientation === 'landscape')) s.layout.one.orientation = L.orientation;
   }
+  return s;
+}
+/** The look part of a theme: everything except captions, date and the open tab. */
+const currentLook = () => JSON.parse(JSON.stringify({
+  format: state.format, layout: state.layout, color: state.color, marks: state.marks, paperId: state.paperId, customPaper: state.customPaper,
+}));
+function loadState() {
+  const s = defaults();
+  const saved = readJson(STATE_KEY);
+  if (!saved) return s;
+  // Every session opens on Two Minis; any custom size/position is kept.
+  readLook(s, saved);
+  if (['frame', 'captions', 'paper'].includes(saved.tab)) s.tab = saved.tab;
   const layers = sanitizeLayers(saved.layers);
   if (layers) { s.layers = layers; s.templateId = saved.templateId ?? null; }
   s.date = migrateDate(saved.date, saved.layers) || s.date;
@@ -548,7 +557,7 @@ $('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.che
 /* ---------------- captions: templates ---------------- */
 function allTemplates() {
   return [
-    ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, layers: () => t.layers, date: () => t.date })),
+    ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, look: t.look, layers: () => t.layers, date: () => t.date })),
     ...templates.map((t) => ({ ...t, layers: () => t.layers, date: () => t.date })),
   ];
 }
@@ -567,24 +576,54 @@ async function copyText(text, what) {
     await navigator.clipboard.writeText(text);
     toast(`${what} copied as text`);
   } catch {
-    const box = $('#importText');
-    box.value = text;
-    box.focus();
+    // No async clipboard (older browsers, insecure context): copy through a temporary field
+    // inside whichever dialog is open, so the selection is not blocked by the modal.
+    const box = Object.assign(document.createElement('textarea'), { value: text, readOnly: true });
+    box.style.cssText = 'position:fixed;opacity:0;left:0;top:0';
+    ($$('dialog[open]').pop() || document.body).append(box);
     box.select();
-    toast('Select-all and copy the text below');
+    const ok = document.execCommand?.('copy');
+    box.remove();
+    toast(ok ? `${what} copied as text` : 'Copy failed — use Save file instead');
   }
 }
+/** Apply a template: its captions and date, and its whole look when it has one. */
 function applyTemplate(t) {
   state.layers = cloneLayers(t.layers());
   state.date = cloneDate(t.date());
   state.templateId = t.id;
-  saveState();
-  buildTemplateChips();
-  buildLayerList();
-  buildDateRow();
-  loadFonts(fontsInUse()).then(drawPreview);
-  drawPreview();
+  if (t.look) {
+    const s = readLook(defaults(), t.look);
+    Object.assign(state, {
+      format: t.look.format === 'one' ? 'one' : 'two',
+      layout: s.layout, color: s.color, marks: s.marks, paperId: s.paperId, customPaper: s.customPaper,
+    });
+  }
+  update();
 }
+const newTemplateId = () => `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+/** Save parsed templates under their own names (replacing same-named ones); returns the saved list. */
+function storeTemplates(parsed) {
+  return parsed.map((t) => {
+    const existing = templates.find((x) => x.name.toLowerCase() === t.name.toLowerCase());
+    const tpl = { id: existing?.id || newTemplateId(), name: t.name, layers: t.layers, date: t.date, look: t.look };
+    templates = existing ? templates.map((x) => (x.id === tpl.id ? tpl : x)) : [...templates, tpl];
+    return tpl;
+  });
+}
+/** Import pasted template text: save every theme by name and apply the first one. */
+function importTemplates(text) {
+  let parsed;
+  try { parsed = parseTemplatesText(text); } catch (err) { toast(err.message); return false; }
+  const saved = storeTemplates(parsed);
+  saveTemplates();
+  applyTemplate({ ...saved[0], layers: () => saved[0].layers, date: () => saved[0].date });
+  buildTemplateManager();
+  toast(parsed.length === 1 ? `Imported “${parsed[0].name}”` : `Imported ${parsed.length} templates`);
+  return true;
+}
+const currentThemeName = () => allTemplates().find((t) => t.id === state.templateId)?.name || 'My theme';
+const currentTheme = (name) => ({ name, layers: state.layers, date: state.date, look: currentLook() });
 function buildTemplateChips() {
   $('#templateChips').replaceChildren(...allTemplates().map((t) => {
     const b = document.createElement('button');
@@ -602,7 +641,7 @@ function buildTemplateManager() {
   list.replaceChildren(...templates.map((t) => {
     const row = document.createElement('div');
     row.className = 'tpl-row';
-    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.layers.length} caption${t.layers.length === 1 ? '' : 's'} · date ${t.date?.on ? 'on' : 'off'}</small></span>
+    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.look ? 'Full theme · ' : 'Captions only · '}${t.layers.length} caption${t.layers.length === 1 ? '' : 's'} · date ${t.date?.on ? 'on' : 'off'}</small></span>
       <button class="apply">Use</button><button class="exp" aria-label="Copy ${escapeHtml(t.name)} as text">Copy</button><button class="del" aria-label="Delete ${escapeHtml(t.name)}">Delete</button>`;
     row.querySelector('.exp').addEventListener('click', () => copyText(exportTemplatesText([t]), `“${t.name}”`));
     row.querySelector('.apply').addEventListener('click', () => { applyTemplate({ ...t, layers: () => t.layers, date: () => t.date }); $('#templatesDlg').close(); });
@@ -616,31 +655,25 @@ function buildTemplateManager() {
   }));
 }
 $('[data-open="templatesDlg"]').addEventListener('click', buildTemplateManager);
-$('#copyCurrent').addEventListener('click', () => copyText(exportTemplatesText([{ name: 'My captions', layers: state.layers, date: state.date }]), 'Current captions'));
+$('#copyCurrent').addEventListener('click', () => copyText(exportTemplatesText([currentTheme(currentThemeName())]), 'Current theme'));
 $('#copyAll').addEventListener('click', () => {
   if (!templates.length) return toast('No saved templates yet');
   copyText(exportTemplatesText(templates), 'Templates');
 });
-$('#importForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  let parsed;
-  try { parsed = parseTemplatesText($('#importText').value); } catch (err) { return toast(err.message); }
-  for (const t of parsed) {
-    const existing = templates.find((x) => x.name.toLowerCase() === t.name.toLowerCase());
-    const tpl = { id: existing?.id || `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t.name, layers: t.layers, date: t.date };
-    templates = existing ? templates.map((x) => (x.id === tpl.id ? tpl : x)) : [...templates, tpl];
-  }
-  saveTemplates();
-  $('#importText').value = '';
-  buildTemplateManager(); buildTemplateChips();
-  toast(`Imported ${parsed.length} template${parsed.length === 1 ? '' : 's'}`);
-});
+for (const [form, box] of [['#importForm', '#importText'], ['#helpImport', '#helpImportText']]) {
+  $(form).addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!importTemplates($(box).value)) return;
+    $(box).value = '';
+    if (form === '#helpImport') $('#help').close();
+  });
+}
 $('#tplForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const name = $('#tplName').value.trim();
   if (!name) return;
   const existing = templates.find((t) => t.name.toLowerCase() === name.toLowerCase());
-  const tpl = { id: existing?.id || `u${Date.now().toString(36)}`, name, layers: cloneLayers(state.layers), date: cloneDate(state.date) };
+  const tpl = { id: existing?.id || newTemplateId(), name, layers: cloneLayers(state.layers), date: cloneDate(state.date), look: currentLook() };
   templates = existing ? templates.map((t) => (t.id === tpl.id ? tpl : t)) : [...templates, tpl];
   state.templateId = tpl.id;
   saveTemplates(); saveState();
@@ -1110,7 +1143,6 @@ function update() {
   buildTemplateChips();
   buildLayerList();
   buildDateRow();
-  $('#exportBtn').disabled = !photos.slice(0, count()).some(Boolean);
   buildSlots();
   buildPhotoList();
   drawPreview();
@@ -1127,9 +1159,19 @@ async function exportSheet() {
   const preview = $('#exportPreview');
   const dl = $('#downloadLink');
   const share = $('#shareBtn');
+  $('#themeName').value = currentThemeName();
+  const hasPhoto = slots.some((s) => s.photo);
+  $('#printActions').hidden = !hasPhoto;
+  share.hidden = true;
+  if (!hasPhoto) {
+    // No photos yet: only the theme can be exported.
+    preview.innerHTML = '<p class="empty-note">Add a photo to export a print.</p>';
+    $('#exportStats').textContent = '';
+    exportDlg.showModal();
+    return;
+  }
   preview.innerHTML = '<div class="spinner" aria-label="Rendering"></div>';
   dl.setAttribute('aria-disabled', 'true');
-  share.hidden = true;
   $('#exportStats').textContent = 'Rendering at full resolution…';
   exportDlg.showModal();
   await loadFonts(fontsInUse());
@@ -1174,6 +1216,26 @@ async function exportSheet() {
   if (canShare) share.onclick = () => navigator.share({ files: [file], title: 'Twin Mini print' }).catch(() => {});
 }
 $('#exportBtn').addEventListener('click', exportSheet);
+
+/* ---------------- themes: export (Export dialog) and import (? dialog) ---------------- */
+const themeText = () => exportTemplatesText([currentTheme($('#themeName').value.trim() || 'My theme')]);
+$('#themeExport').addEventListener('submit', (e) => {
+  e.preventDefault();
+  copyText(themeText(), `“${$('#themeName').value.trim()}”`);
+});
+$('#themeFile').addEventListener('click', () => {
+  const name = $('#themeName').value.trim() || 'My theme';
+  const url = URL.createObjectURL(new Blob([themeText()], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `${name.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '') || 'theme'}.twinmini.json` });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$('#helpImportFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  if (importTemplates(await file.text())) $('#help').close();
+});
 
 /* ---------------- bottom sheets: drag the handle (phones) ---------------- */
 // On phones every dialog is a bottom sheet with a grab handle. Dragging the handle (or the
