@@ -67,3 +67,24 @@ test('sanitizeLayers repairs stored data; cloneLayers gives fresh ids', () => {
   const c = cloneLayers(s);
   assert.notEqual(c[0].id, s[0].id);
 });
+
+import { exportTemplatesText, parseTemplatesText, dateLayer as dl, textLayer as tl } from '../app/src/captions.js';
+
+test('template text round-trips through export and import', () => {
+  const layers = [tl({ texts: ['a', 'b'], font: 'Pacifico', edge: 'top' }), dl({ dateFormat: 'stamp', color: 'stamp' })];
+  const one = exportTemplatesText([{ name: 'Retro', layers }]);
+  assert.match(one, /"twinmini": "caption-template"/);
+  const [back] = parseTemplatesText(one);
+  assert.equal(back.name, 'Retro');
+  assert.deepEqual(back.layers.map((l) => [l.kind, l.font, l.edge, l.dateFormat ?? null]), [['text', 'Pacifico', 'top', null], ['date', 'Caveat', 'bottom', 'stamp']]);
+  assert.deepEqual(back.layers[0].texts, ['a', 'b']);
+  assert.ok(!('texts' in JSON.parse(one).captions[1]), 'date captions carry no text fields');
+  const many = exportTemplatesText([{ name: 'A', layers }, { name: 'B', layers: [] }]);
+  assert.deepEqual(parseTemplatesText(many).map((t) => t.name), ['A', 'B']);
+  assert.deepEqual(parseTemplatesText(JSON.stringify({ templates: JSON.parse(many) })).map((t) => t.name), ['A', 'B']);
+});
+
+test('import rejects junk with a readable message', () => {
+  assert.throws(() => parseTemplatesText('hello'), /invalid JSON/);
+  assert.throws(() => parseTemplatesText('{"name":"x"}'), /captions/);
+});

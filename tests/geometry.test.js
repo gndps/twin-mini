@@ -71,3 +71,50 @@ test('output dpi follows the sharpest photo with no fixed ceiling, only the pixe
 test('effectiveDpi: 2268 px across 46 mm ≈ 1252 dpi', () => {
   near(effectiveDpi(2268, 46), 1252.3, 0.1);
 });
+
+import { ASPECTS, FORMATS, defaultSize } from '../app/src/geometry.js';
+
+test('aspect presets come from instant-camera film formats', () => {
+  assert.deepEqual(ASPECTS.map((a) => [a.id, a.w, a.h]), [['mini', 46, 62], ['square', 62, 62], ['wide', 99, 62], ['zink', 50.8, 76.2]]);
+  assert.equal(FORMATS.two.aspect, 'mini');
+  assert.equal(FORMATS.one.aspect, 'wide');
+});
+
+test('custom layout stays centred left-right; size keeps the aspect; offset moves vertically', () => {
+  for (const aspect of ASPECTS.map((a) => a.id)) {
+    for (const size of [0.4, 0.7, 1]) {
+      for (const offset of [-1, -0.3, 0, 0.5, 1]) {
+        const L = computeLayout({ paperId: 'RP-108', format: 'two', aspect, size, offset });
+        for (const c of L.cards) {
+          near(c.win.x - c.x, c.x + c.w - (c.win.x + c.win.w));           // centred horizontally
+          const a = ASPECTS.find((x) => x.id === aspect);
+          near(c.win.w / c.win.h, a.w / a.h, 2e-3);                       // fixed aspect
+          assert.ok(c.win.y >= -1e-6 && c.win.y + c.win.h <= c.h + 1e-6);  // inside the card
+        }
+        near(L.cutX, 74);
+        if (offset === 0) near(L.cards[0].win.y + L.cards[0].win.h / 2, 50);
+      }
+    }
+  }
+});
+
+test('offset −1 / +1 puts the photo flush with the top / bottom edge', () => {
+  near(computeLayout({ offset: -1 }).cards[0].win.y, 0);
+  const d = computeLayout({ offset: 1 }).cards[0];
+  near(d.win.y + d.win.h, d.h);
+});
+
+test('One Wide: single card fills the sheet; portrait turns the sheet and the photo upright', () => {
+  const land = computeLayout({ format: 'one' });
+  assert.equal(land.cards.length, 1);
+  assert.equal(land.cutX, null);
+  near(land.cards[0].w, 148);
+  assert.ok(land.cards[0].win.w > land.cards[0].win.h);
+  assert.ok(land.cards[0].chin.h > land.cards[0].win.y, 'chin below a landscape photo');
+  const port = computeLayout({ format: 'one', orientation: 'portrait' });
+  near(port.paper.w, 100); near(port.paper.h, 148);
+  assert.ok(port.cards[0].win.h > port.cards[0].win.w);
+  near(port.cards[0].win.h / port.cards[0].win.w, 99 / 62, 2e-3);
+  assert.ok(port.cards[0].chin.h > port.cards[0].win.y, 'chin below a portrait photo');
+  near(defaultSize('one', 'portrait'), 0.75);
+});
