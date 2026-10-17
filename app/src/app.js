@@ -321,6 +321,7 @@ const pct = (r, paper) => ({
 /** Tap on a photo in the preview: select it and bring its controls into view. */
 function select(i) {
   selected = i;
+  setTab('frame'); // the photo's controls live in the Photos tab
   $$('.slot.filled').forEach((s) => s.classList.remove('selected'));
   slotsEl.children[i]?.classList.add('selected');
   $$('.photo-row').forEach((r) => r.classList.toggle('selected', Number(r.dataset.i) === i));
