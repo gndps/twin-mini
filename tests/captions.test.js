@@ -125,3 +125,12 @@ test('stored date captions are repaired and keep their source through template t
   assert.equal(t.layers[0].dateFormat, 't12');
   assert.equal(t.layers[0].source, 'now');
 });
+
+import { SHIFT, sanitizeLayers as san2, textLayer as tl2, exportTemplatesText as ex2, parseTemplatesText as im2 } from '../app/src/captions.js';
+
+test('caption distance: defaults to centred, clamped, survives template text', () => {
+  assert.equal(tl2().shift, 0);
+  assert.equal(san2([{ kind: 'text', shift: -99 }])[0].shift, SHIFT.min);
+  const [t] = im2(ex2([{ name: 'S', layers: [tl2({ shift: -6.5 })] }]));
+  assert.equal(t.layers[0].shift, -6.5);
+});
