@@ -583,3 +583,11 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
 .tab-panel { display: flex; flex-direction: column; gap: 22px; }
 .tab-panel:not(.active) { display: none; }
 .tab-panel .group > .list-label:first-child { margin-top: 0; }
+
+/* Draggable sheet handle (phones) */
+@media (max-width: 860px) {
+  .sheet-head { touch-action: none; cursor: grab; }
+  .grabber { width: 40px; height: 5px; top: 7px; }
+  .sheet-head::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 22px; } /* bigger grab zone */
+  .sheet-modal.expanded:not(#layoutDlg), .sheet-modal.expanded:not(#layoutDlg) .sheet-inner { max-height: 92dvh; }
+}
