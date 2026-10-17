@@ -125,3 +125,19 @@ test('cloneLayers gives fresh ids', () => {
   const [a] = [textLayer()];
   assert.notEqual(cloneLayers([a])[0].id, a.id);
 });
+
+import { effectiveShift } from '../app/src/captions.js';
+
+test('caption anchoring: toward the photo keeps the photo-edge gap, away keeps the paper-edge gap', () => {
+  // Set in a 16 mm chin: line centre 8 mm from each side, shifted 3 mm.
+  const closer = { shift: -3, ref: 16 }, further = { shift: 3, ref: 16 }, centred = { shift: 0, ref: 16 };
+  for (const band of [10, 16, 30]) {
+    const fromPhoto = (l) => band / 2 + effectiveShift(l, band);  // gap: photo edge → line centre
+    const fromEdge = (l) => band / 2 - effectiveShift(l, band);   // gap: paper edge → line centre
+    assert.equal(fromPhoto(closer), 5);
+    assert.equal(fromEdge(further), 5);
+    assert.equal(effectiveShift(centred, band), 0);
+  }
+  // Captions saved before anchoring existed behave as before.
+  assert.equal(effectiveShift({ shift: -4 }, 30), -4);
+});
