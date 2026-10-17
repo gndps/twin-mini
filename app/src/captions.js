@@ -7,6 +7,18 @@ export const EDGES = ['bottom', 'top', 'left', 'right'];
 export const SHIFT = { min: -15, max: 15 };
 export const ALIGNS = ['start', 'center', 'end'];
 
+/**
+ * Where a caption sits across its border band when the photo changes size. `shift` was set
+ * while the band was `ref` mm thick: a caption pulled toward the photo keeps its distance from
+ * the photo edge, one pushed away keeps its distance from the outer paper edge, and a centred
+ * one stays centred. Returns the shift (from the band centre) to use for a band `band` mm thick.
+ */
+export function effectiveShift(l, band) {
+  const s = l.shift || 0;
+  if (!s || !Number.isFinite(l.ref)) return s;
+  return s < 0 ? s + (l.ref - band) / 2 : s + (band - l.ref) / 2;
+}
+
 export const CAPTION_COLORS = [
   { id: 'auto', label: 'Auto', value: null },
   { id: 'ink', label: 'Ink', value: '#1C1B19' },
@@ -132,6 +144,7 @@ function sanitizeStyle(l, base) {
     align: ALIGNS.includes(l.align) ? l.align : base.align,
     size: Number.isFinite(l.size) ? Math.min(14, Math.max(1.5, l.size)) : base.size,
     shift: Number.isFinite(l.shift) ? Math.min(SHIFT.max, Math.max(SHIFT.min, l.shift)) : 0,
+    ref: Number.isFinite(l.ref) && l.ref >= 0 ? l.ref : undefined,
   };
 }
 
@@ -172,11 +185,12 @@ export function migrateDate(date, legacyLayers) {
 // One template:  {"twinmini":"caption-template","version":2,"name":"…","captions":[…],"date":{…}}
 // Several: an array of those, or {"templates":[…]}.
 // Caption fields: font, size (mm), edge, align, color, shift (mm, − = toward the photo),
+//   ref (border thickness in mm when shift was set; anchors the caption, see effectiveShift),
 //   same + text, or texts (one per photo).
 // Date fields: on, source ("photo" | "now"), the same style fields, and fmt:
 //   { show, order, month, year, sep, weekday, clock, seconds } (see DATE_OPTIONS).
 export const TEMPLATE_FORMAT = 'caption-template';
-const STYLE_KEYS = ['font', 'size', 'edge', 'align', 'color', 'shift'];
+const STYLE_KEYS = ['font', 'size', 'edge', 'align', 'color', 'shift', 'ref'];
 
 export function templateToJson(name, layers, date) {
   const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));

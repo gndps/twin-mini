@@ -4,7 +4,7 @@ import { setPngDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
 import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
 import {
-  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_OPTIONS, TIME_SOURCES, formatDate,
+  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_OPTIONS, TIME_SOURCES, formatDate, effectiveShift,
   cloneLayers, cloneDate, dateSettings, defaultCaptions, defaultDate, migrateDate,
   resolveCaptions, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
 } from './captions.js';
@@ -700,8 +700,9 @@ function fillLayerDialog() {
   $('#layerFontName').style.fontFamily = fontCss(l.font);
   $('#layerSize').value = l.size;
   $('#layerSizeVal').textContent = `${l.size.toFixed(1)} mm`;
-  $('#layerShift').value = l.shift || 0;
-  $('#layerShiftVal').textContent = shiftLabel(l.shift || 0);
+  const shown = effectiveShift(l, bandThickness(l.edge));
+  $('#layerShift').value = shown;
+  $('#layerShiftVal').textContent = shiftLabel(shown);
   $('#layerColors').replaceChildren(...CAPTION_COLORS.map((c) => {
     const b = document.createElement('button');
     b.setAttribute('role', 'radio');
@@ -733,6 +734,11 @@ $('#layerSame').addEventListener('change', (e) => {
   captionsChanged({ rebuildList: true });
   fillLayerDialog();
 });
+/** Thickness (mm) of the border band a caption on `edge` sits in, for the current layout. */
+function bandThickness(edge) {
+  const c = currentLayout().cards[0];
+  return edge === 'bottom' ? c.chin.h : edge === 'top' ? c.top.h : c.left.w;
+}
 function shiftLabel(v) {
   if (Math.abs(v) < 0.25) return 'Centred';
   return `${Math.abs(v).toFixed(1)} mm ${v < 0 ? 'closer' : 'further'}`;
@@ -742,6 +748,7 @@ $('#layerShift').addEventListener('input', (e) => {
   let v = Number(e.target.value);
   if (Math.abs(v) < 0.4) v = 0; // snap to centred
   l.shift = v;
+  l.ref = bandThickness(l.edge); // remember the border it was placed in, to anchor it later
   $('#layerShiftVal').textContent = shiftLabel(v);
   captionsChanged();
 });
@@ -755,7 +762,13 @@ for (const [id, key] of [['#layerEdge', 'edge'], ['#layerAlign', 'align']]) {
   $(id).addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    layerById(editId)[key] = b.dataset.value;
+    const l = layerById(editId);
+    if (key === 'edge' && l.edge !== b.dataset.value) {
+      // Moving to another edge keeps the visible offset, measured in the new border.
+      l.shift = effectiveShift(l, bandThickness(l.edge));
+      l.ref = bandThickness(b.dataset.value);
+    }
+    l[key] = b.dataset.value;
     captionsChanged({ rebuildList: true });
     fillLayerDialog();
   });

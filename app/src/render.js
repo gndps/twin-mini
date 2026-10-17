@@ -1,7 +1,7 @@
 // Canvas renderer: draws the whole print sheet at any scale (px per mm).
 import { cropRect } from './geometry.js';
 import { fontCss } from './fonts.js';
-import { CAPTION_COLORS } from './captions.js';
+import { CAPTION_COLORS, effectiveShift } from './captions.js';
 
 export const FRAME_COLORS = [
   { id: 'white', label: 'White', fill: '#FFFFFF', ink: '#2E2B28' },
@@ -83,7 +83,8 @@ const LINE = 1.22; // line height as a multiple of the font size
 
 /**
  * Captions are grouped by edge and stacked in reading order, centred across the border band,
- * then nudged by their own `shift` (mm) toward the photo (may overlap it) or away from it.
+ * then nudged by their own `shift` (mm) toward the photo (may overlap it) or away from it,
+ * anchored to the photo edge or the paper edge as the photo is resized (see effectiveShift).
  * Along the edge they align to the photo window (start / centre / end), like hand-written
  * notes on real film. Side captions are rotated: the left reads upwards, the right downwards.
  */
@@ -112,7 +113,7 @@ function drawCaptions(ctx, card, captions, autoInk) {
     for (const l of lines) {
       const size = l.size * k;
       const lh = size * LINE;
-      const dy = away * (l.shift || 0);
+      const dy = away * effectiveShift(l, across);
       ctx.font = `${size}px ${fontCss(l.font)}`;
       ctx.fillStyle = CAPTION_COLORS.find((c) => c.id === l.color)?.value || autoInk;
       ctx.textBaseline = 'middle';
