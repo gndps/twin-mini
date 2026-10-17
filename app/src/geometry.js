@@ -14,12 +14,15 @@ export const PAPERS = {
 
 // Frame specs: window size + margins. Card = window + margins.
 // `fill: true` means the card grows to fill its half of the sheet (only cut the middle).
+// Borderless SELPHY prints trim roughly this much from every paper edge.
+export const OVERSCAN_MM = 2;
+
 export const FRAMES = {
   mini: {
+    half: { label: 'Half sheet', detail: 'Cut the middle only', fill: true, side: 9, top: 9 },
     'true': { label: 'True Mini', detail: '54 × 86 mm · real film size', winW: 46, winH: 62, top: 6, side: 4, chin: 18 },
     large: { label: 'Large', detail: '59 × 95 mm · +10%', winW: 50.6, winH: 68.2, top: 6.6, side: 4.4, chin: 19.8 },
     compact: { label: 'Compact', detail: '2 × 3 in · 50.8 × 76.2 mm', winW: 42.33, winH: 57.07, top: 4.83, side: 4.23, chin: 14.3 },
-    half: { label: 'Half sheet', detail: 'Cut the middle only', fill: true, side: 9, top: 9 },
   },
   wide: {
     'true': { label: 'True Wide', detail: '108 × 86 mm · real film size', winW: 99, winH: 62, top: 6, side: 4.5, chin: 18 },
@@ -35,10 +38,15 @@ export function frameSpec(layout, frameId, paper, custom) {
   }
   const f = FRAMES[layout][frameId] || FRAMES[layout]['true'];
   if (!f.fill) return f;
+  // The card is the whole cell, so its outer edges fall in the borderless trim zone.
+  // Lay the window out inside what survives the trim (cell minus overscan on the three
+  // paper edges) so the borders come out even; the frame colour still bleeds to the edge.
   const cell = cellSize(layout, paper);
-  const winW = cell.w - 2 * f.side;
+  const visW = cell.w - OVERSCAN_MM;
+  const visH = cell.h - 2 * OVERSCAN_MM;
+  const winW = visW - 2 * f.side;
   const winH = winW / MINI_ASPECT;
-  return { winW, winH, top: f.top, side: f.side, chin: cell.h - f.top - winH };
+  return { winW, winH, top: f.top, side: f.side, chin: visH - f.top - winH, fill: true };
 }
 
 export function cellSize(layout, paper) {
@@ -60,6 +68,18 @@ export function computeLayout({ layout = 'mini', frame = 'true', paperId = 'post
   const count = layout === 'wide' ? 1 : 2;
   const cards = [];
   for (let i = 0; i < count; i++) {
+    if (spec.fill) {
+      // Bleed card: fills the cell; visible part starts OVERSCAN_MM in from the outer edges.
+      const x = i * cell.w, vx = i === 0 ? x + OVERSCAN_MM : x;
+      const vy = OVERSCAN_MM, vw = cell.w - OVERSCAN_MM;
+      cards.push({
+        x: r(x), y: 0, w: r(cell.w), h: r(cell.h), bleed: true,
+        visible: { x: r(vx), y: vy, w: r(vw), h: r(cell.h - 2 * OVERSCAN_MM) },
+        win: { x: r(vx + spec.side), y: r(vy + spec.top), w: r(spec.winW), h: r(spec.winH) },
+        chin: { x: r(vx), y: r(vy + spec.top + spec.winH), w: r(vw), h: r(spec.chin) },
+      });
+      continue;
+    }
     const x = i * cell.w + (cell.w - cardW) / 2;
     const y = (cell.h - cardH) / 2;
     cards.push({
@@ -68,7 +88,7 @@ export function computeLayout({ layout = 'mini', frame = 'true', paperId = 'post
       chin: { x: r(x), y: r(y + spec.top + spec.winH), w: r(cardW), h: r(spec.chin) },
     });
   }
-  const overflow = Math.max(cardW - cell.w, cardH - cell.h, 0);
+  const overflow = spec.fill ? 0 : Math.max(cardW - cell.w, cardH - cell.h, 0);
   return { paper, cards, cutX: count === 2 ? paper.w / 2 : null, fits: overflow < 0.01, overflow: r(overflow), spec };
 }
 

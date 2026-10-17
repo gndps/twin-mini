@@ -34,8 +34,10 @@ export function renderSheet(ctx, layout, slots, opts) {
   const { paper, cards } = layout;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  if (!opts.keepBackground) {
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
   ctx.scale(scale, scale);
   if (opts.origin) ctx.translate(-opts.origin.x, -opts.origin.y);
 
@@ -129,7 +131,8 @@ function drawMarks(ctx, layout, scale) {
     ctx.beginPath();
     const top = Math.min(...cards.map((c) => c.y));
     const bottom = Math.max(...cards.map((c) => c.y + c.h));
-    const touches = cards.some((c) => c.x < cutX + 0.01 && c.x + c.w > cutX - 0.01);
+    // Only skip the stretch where a single card spans the cut; abutting cards share it as an edge.
+    const touches = cards.some((c) => c.x < cutX - 0.01 && c.x + c.w > cutX + 0.01);
     if (!touches) { ctx.moveTo(cutX, 0); ctx.lineTo(cutX, paper.h); }
     else { ctx.moveTo(cutX, 0); ctx.lineTo(cutX, top); ctx.moveTo(cutX, bottom); ctx.lineTo(cutX, paper.h); }
     ctx.stroke();
