@@ -46,23 +46,23 @@
 
     <aside class="inspector" aria-label="Settings">
       <div class="inspector-scroll">
-        <section class="group">
-          <div class="group-head">
-            <h2 class="group-title">Photos</h2>
-            <button class="text-btn" id="swapBtn" hidden>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>Swap
-            </button>
-          </div>
-          <div class="card" id="photoList"></div>
-        </section>
-
         <div class="seg tab-bar" role="tablist" aria-label="Settings" id="tabBar">
-          <button role="tab" data-tab="frame" aria-controls="panel-frame">Frame</button>
+          <button role="tab" data-tab="frame" aria-controls="panel-frame">Photos</button>
           <button role="tab" data-tab="captions" aria-controls="panel-captions">Captions</button>
           <button role="tab" data-tab="paper" aria-controls="panel-paper">Paper</button>
         </div>
 
         <div class="tab-panel" id="panel-frame" role="tabpanel" data-panel="frame">
+          <section class="group">
+            <div class="group-head">
+              <h2 class="group-title">Photos</h2>
+              <button class="text-btn" id="swapBtn" hidden>
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>Swap
+              </button>
+            </div>
+            <div class="card" id="photoList"></div>
+          </section>
+
           <section class="group">
             <h2 class="group-title">Layout</h2>
             <div class="card">
