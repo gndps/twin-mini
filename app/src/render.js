@@ -111,10 +111,17 @@ function drawCaptions(ctx, card, captions, autoInk, hits) {
     const away = edge === 'bottom' ? 1 : -1;
     let y = -(total * k) / 2;
     for (const l of lines) {
-      const size = l.size * k;
+      let size = l.size * k;
       const lh = size * LINE;
       const dy = away * effectiveShift(l, across);
       ctx.font = `${size}px ${fontCss(l.font)}`;
+      // Too long for the edge: shrink this line to fit (down to 35 % of its size), so the
+      // whole caption prints instead of being cut off; only past that is it shortened with "…".
+      const wide = l.text ? ctx.measureText(l.text).width : 0;
+      if (wide > length) {
+        size = Math.max(size * 0.35, size * (length / wide) * 0.98);
+        ctx.font = `${size}px ${fontCss(l.font)}`;
+      }
       ctx.fillStyle = CAPTION_COLORS.find((c) => c.id === l.color)?.value || autoInk;
       ctx.textBaseline = 'middle';
       ctx.textAlign = l.align === 'start' ? 'left' : l.align === 'end' ? 'right' : 'center';
