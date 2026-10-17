@@ -1,5 +1,7 @@
 # Twin Mini
 
+**Live:** https://twin-mini.vercel.app
+
 Instax-style framed prints from a **Canon SELPHY CP1500** (or any 4×6 / postcard photo printer).
 
 Add one or two photos → get a single print-ready sheet with two Instax Mini frames (or one Instax Wide frame) laid out on a 148 × 100 mm SELPHY postcard. Print borderless, cut down the middle, trim at the corner ticks.
