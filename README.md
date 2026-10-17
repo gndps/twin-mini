@@ -10,11 +10,12 @@ Everything runs in the browser. Photos are never uploaded.
 
 ## Features
 
-- **Real Instax geometry.** True Mini = 54 × 86 mm card with a 46 × 62 mm photo (4 mm sides, 6 mm top, 18 mm chin). Also Large (+10 %), Compact (2 × 3 in), Half sheet (cut the middle only), Instax Wide, and Custom margins.
-- **Full resolution.** Photos are cropped from the original pixels (never re-compressed or stretched). *Auto* output dpi matches your sharpest photo (300–1200 dpi, capped to the browser's canvas limit), so the printer does the only resample. The dpi is written into the PNG (`pHYs`) / JPEG (JFIF) so the file opens at its true physical size.
-- **Orientation.** EXIF orientation from phone photos is honoured. Each photo can be rotated left/right or turned 180° (rotation only, never mirrored), panned, and zoomed.
-- **Cut guides.** Optional hairline (≈ 0.09 mm, one printer dot) dashed centre line and corner ticks in light grey. Toggle off and they disappear from both the preview and the file.
-- Frame colours, optional handwritten/serif/sans caption on the chin, Postcard or 4 × 6 in paper, PNG or JPEG, share sheet on mobile.
+- **Half sheet by default.** Every session opens on two Mini-style frames that each fill half of the postcard, so the only cut is down the middle. The photo window keeps the Instax 46 : 62 shape and sits inside what survives the SELPHY's ~2 mm borderless trim, so all four borders come out even; the frame colour bleeds to the paper edge.
+- **Minimal by design.** The main screen holds only photos, frame colour and caption. Format, frame size (True Mini 54 × 86 mm, Large, Compact 2 × 3 in, Instax Wide, Custom), caption font, paper, cut guides, resolution and file type live in **Advanced**.
+- **Phone first.** Large labelled touch targets, bottom sheets, a full-screen crop editor with pinch-to-zoom, a sticky Create button, and Share-to-SELPHY-app on phones.
+- **Full resolution.** Photos are cropped from the original pixels, never stretched. *Auto* output dpi matches your sharpest photo (300–1200 dpi, capped to the browser's canvas limit), and the dpi is written into the PNG (`pHYs`) / JPEG (JFIF) so the file opens at its true size.
+- **Orientation.** EXIF orientation from phone photos is honoured; each photo can be turned left/right or flipped 180° (rotation only, never mirrored).
+- **Cut guides.** Optional hairline (≈ 0.09 mm, one printer dot) dashed centre line and corner ticks in light grey; switching them off removes them from the preview and the file.
 
 ## Develop
 
