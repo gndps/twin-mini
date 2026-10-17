@@ -1,12 +1,12 @@
 import { computeLayout, PAPERS, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
 import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
-import { setJpegDpi } from './dpi.js';
+import { setPngDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
 import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
 import {
-  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_FORMATS, FORMAT_GROUPS, TIME_SOURCES, formatFn, groupLabel,
-  cloneLayers, dateLayer, defaultLayers,
-  resolveLayers, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
+  BUILTIN_TEMPLATES, CAPTION_COLORS, DATE_OPTIONS, TIME_SOURCES, formatDate,
+  cloneLayers, cloneDate, dateSettings, defaultCaptions, defaultDate, migrateDate,
+  resolveCaptions, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
 } from './captions.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -29,9 +29,9 @@ const defaultLayoutFor = (f) => ({
 const defaultLayout = () => ({ two: defaultLayoutFor('two'), one: defaultLayoutFor('one') });
 const defaults = () => ({
   format: 'two', layout: defaultLayout(),
-  color: 'white', marks: true, paperId: DEFAULT_PAPER, layers: defaultLayers(), templateId: BUILTIN_TEMPLATES[0].id,
-  // Last date/time choice: new date captions start from it.
-  dateDefaults: { dateFormat: 'dots', source: 'photo' },
+  color: 'white', marks: true, paperId: DEFAULT_PAPER, templateId: BUILTIN_TEMPLATES[0].id,
+  layers: defaultCaptions(), // text captions
+  date: defaultDate(),       // the one date per print
 });
 const state = loadState();
 let templates = loadTemplates();
@@ -57,8 +57,6 @@ function loadState() {
   if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
   if (typeof saved.marks === 'boolean') s.marks = saved.marks;
   if (PAPERS[saved.paperId]) s.paperId = saved.paperId;
-  if (DATE_FORMATS[saved.dateDefaults?.dateFormat]) s.dateDefaults.dateFormat = saved.dateDefaults.dateFormat;
-  if (saved.dateDefaults?.source === 'now') s.dateDefaults.source = 'now';
   // Every session opens on Two Minis; any custom size/position is kept.
   for (const f of ['two', 'one']) {
     const L = saved.layout?.[f];
@@ -71,12 +69,15 @@ function loadState() {
   }
   const layers = sanitizeLayers(saved.layers);
   if (layers) { s.layers = layers; s.templateId = saved.templateId ?? null; }
+  s.date = migrateDate(saved.date, saved.layers) || s.date;
   return s;
 }
 const saveState = () => writeJson(STATE_KEY, state);
 function loadTemplates() {
   const t = readJson(TEMPLATES_KEY);
-  return Array.isArray(t) ? t.filter((x) => x?.name).map((x) => ({ ...x, layers: sanitizeLayers(x.layers) || [] })) : [];
+  return Array.isArray(t) ? t.filter((x) => x?.name).map((x) => ({
+    ...x, layers: sanitizeLayers(x.layers) || [], date: migrateDate(x.date, x.layers) || dateSettings({ on: false }),
+  })) : [];
 }
 const saveTemplates = () => writeJson(TEMPLATES_KEY, templates);
 
@@ -89,7 +90,7 @@ const today = new Date();
 function renderSlots() {
   return Array.from({ length: count() }, (_, i) => ({
     photo: photos[i],
-    captions: resolveLayers(state.layers, i, photos[i]?.date || today),
+    captions: resolveCaptions(state.layers, state.date, i, photos[i]?.date || today),
   }));
 }
 function photoDpi(photo, win) {
@@ -103,8 +104,8 @@ function quality(dpi) {
 }
 const slotName = (i) => (count() === 1 ? 'Photo' : `Photo ${i + 1}`);
 const slotSide = (i) => (count() === 1 ? 'Whole sheet' : i === 0 ? 'Left half' : 'Right half');
-const layerById = (id) => state.layers.find((l) => l.id === id);
-const fontsInUse = () => [...new Set(state.layers.map((l) => l.font))];
+const layerById = (id) => (id === 'date' ? state.date : state.layers.find((l) => l.id === id));
+const fontsInUse = () => [...new Set([...state.layers.map((l) => l.font), ...(state.date.on ? [state.date.font] : [])])];
 
 /** Any caption edit means the sheet no longer matches a template exactly. */
 function captionsChanged({ rebuildList = false } = {}) {
@@ -112,6 +113,7 @@ function captionsChanged({ rebuildList = false } = {}) {
   saveState();
   buildTemplateChips();
   if (rebuildList) buildLayerList();
+  buildDateRow();
   loadFonts(fontsInUse()).then(drawPreview);
   drawPreview();
 }
@@ -488,9 +490,9 @@ $('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.che
 /* ---------------- captions: templates ---------------- */
 function allTemplates() {
   return [
-    ...BUILTIN_TEMPLATES.map((t) => ({ id: t.id, name: t.name, layers: t.layers })),
-    ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, layers: () => t.layers })),
-    ...templates.map((t) => ({ ...t, layers: () => t.layers })),
+    ...BUILTIN_TEMPLATES.map((t) => ({ id: t.id, name: t.name, layers: t.captions, date: t.date })),
+    ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, layers: () => t.layers, date: () => t.date })),
+    ...templates.map((t) => ({ ...t, layers: () => t.layers, date: () => t.date })),
   ];
 }
 /** Templates shipped with the site: app/templates.json, in the same text format as Export. */
@@ -517,10 +519,12 @@ async function copyText(text, what) {
 }
 function applyTemplate(t) {
   state.layers = cloneLayers(t.layers());
+  state.date = cloneDate(t.date());
   state.templateId = t.id;
   saveState();
   buildTemplateChips();
   buildLayerList();
+  buildDateRow();
   loadFonts(fontsInUse()).then(drawPreview);
   drawPreview();
 }
@@ -541,10 +545,10 @@ function buildTemplateManager() {
   list.replaceChildren(...templates.map((t) => {
     const row = document.createElement('div');
     row.className = 'tpl-row';
-    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.layers.length} caption${t.layers.length === 1 ? '' : 's'}</small></span>
+    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.layers.length} caption${t.layers.length === 1 ? '' : 's'} · date ${t.date?.on ? 'on' : 'off'}</small></span>
       <button class="apply">Use</button><button class="exp" aria-label="Copy ${escapeHtml(t.name)} as text">Copy</button><button class="del" aria-label="Delete ${escapeHtml(t.name)}">Delete</button>`;
     row.querySelector('.exp').addEventListener('click', () => copyText(exportTemplatesText([t]), `“${t.name}”`));
-    row.querySelector('.apply').addEventListener('click', () => { applyTemplate({ ...t, layers: () => t.layers }); $('#templatesDlg').close(); });
+    row.querySelector('.apply').addEventListener('click', () => { applyTemplate({ ...t, layers: () => t.layers, date: () => t.date }); $('#templatesDlg').close(); });
     row.querySelector('.del').addEventListener('click', () => {
       templates = templates.filter((x) => x.id !== t.id);
       if (state.templateId === t.id) state.templateId = null;
@@ -555,7 +559,7 @@ function buildTemplateManager() {
   }));
 }
 $('[data-open="templatesDlg"]').addEventListener('click', buildTemplateManager);
-$('#copyCurrent').addEventListener('click', () => copyText(exportTemplatesText([{ name: 'My captions', layers: state.layers }]), 'Current captions'));
+$('#copyCurrent').addEventListener('click', () => copyText(exportTemplatesText([{ name: 'My captions', layers: state.layers, date: state.date }]), 'Current captions'));
 $('#copyAll').addEventListener('click', () => {
   if (!templates.length) return toast('No saved templates yet');
   copyText(exportTemplatesText(templates), 'Templates');
@@ -566,7 +570,7 @@ $('#importForm').addEventListener('submit', (e) => {
   try { parsed = parseTemplatesText($('#importText').value); } catch (err) { return toast(err.message); }
   for (const t of parsed) {
     const existing = templates.find((x) => x.name.toLowerCase() === t.name.toLowerCase());
-    const tpl = { id: existing?.id || `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t.name, layers: t.layers };
+    const tpl = { id: existing?.id || `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t.name, layers: t.layers, date: t.date };
     templates = existing ? templates.map((x) => (x.id === tpl.id ? tpl : x)) : [...templates, tpl];
   }
   saveTemplates();
@@ -579,7 +583,7 @@ $('#tplForm').addEventListener('submit', (e) => {
   const name = $('#tplName').value.trim();
   if (!name) return;
   const existing = templates.find((t) => t.name.toLowerCase() === name.toLowerCase());
-  const tpl = { id: existing?.id || `u${Date.now().toString(36)}`, name, layers: cloneLayers(state.layers) };
+  const tpl = { id: existing?.id || `u${Date.now().toString(36)}`, name, layers: cloneLayers(state.layers), date: cloneDate(state.date) };
   templates = existing ? templates.map((t) => (t.id === tpl.id ? tpl : t)) : [...templates, tpl];
   state.templateId = tpl.id;
   saveTemplates(); saveState();
@@ -588,34 +592,39 @@ $('#tplForm').addEventListener('submit', (e) => {
   toast(existing ? `Updated “${name}”` : `Saved “${name}”`);
 });
 
-/* ---------------- captions: layers on the main screen ---------------- */
-const stampFor = (l, i = 0) => (l.source === 'now' ? new Date() : photos[i]?.date || today);
+/* ---------------- captions: the date and text captions on the main screen ---------------- */
+const firstPhotoDate = () => photos.find(Boolean)?.date || today;
+const stampFor = (l) => (l.source === 'now' ? new Date() : firstPhotoDate());
 function describe(l) {
   const where = { bottom: 'Bottom', top: 'Top', left: 'Left side', right: 'Right side' }[l.edge];
   const align = { start: 'start', center: 'centre', end: 'end' }[l.align];
   return `${where} · ${align}`;
 }
+function buildDateRow() {
+  const d = state.date;
+  $('#dateToggle').checked = d.on;
+  $('#dateSummary').textContent = d.on
+    ? `${formatDate(stampFor(d), d.fmt)}${d.source === 'now' ? ' · now' : ''} · ${describe(d)}`
+    : 'Off';
+}
+$('#dateToggle').addEventListener('change', (e) => { state.date.on = e.target.checked; captionsChanged(); });
+$('#dateEdit').addEventListener('click', () => openLayer('date'));
+
 function buildLayerList() {
   const list = $('#layerList');
-  if (!state.layers.length) {
-    list.innerHTML = '<p class="empty-note">No captions. Pick a template or add one.</p>';
-    return;
-  }
+  if (!state.layers.length) { list.replaceChildren(); return; }
   list.replaceChildren(...state.layers.map((l) => {
     const row = document.createElement('div');
     row.className = 'layer-row';
-    const sample = l.kind === 'date' ? formatFn(l.dateFormat)(stampFor(l)) : '';
     row.innerHTML = `
-      <span class="layer-icon">${icon(l.kind === 'date' ? 'date' : 'text')}</span>
+      <span class="layer-icon">${icon('text')}</span>
       <div class="layer-main">
-        ${l.kind === 'date'
-          ? `<b>${groupLabel(l.dateFormat)}${l.source === 'now' ? ' · now' : ''}</b><small>${escapeHtml(sample)} · ${describe(l)}</small>`
-          : l.same || count() === 1
-            ? (l.same
-              ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
-              : `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="0" value="${escapeHtml(l.texts[0])}">`)
-            : `<input type="text" maxlength="60" placeholder="Photo 1 caption" aria-label="Photo 1 caption" data-t="0" value="${escapeHtml(l.texts[0])}">
-               <input type="text" maxlength="60" placeholder="Photo 2 caption" aria-label="Photo 2 caption" data-t="1" value="${escapeHtml(l.texts[1])}">`}
+        ${l.same || count() === 1
+          ? (l.same
+            ? `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="all" value="${escapeHtml(l.text)}">`
+            : `<input type="text" maxlength="60" placeholder="Caption" aria-label="Caption" data-t="0" value="${escapeHtml(l.texts[0])}">`)
+          : `<input type="text" maxlength="60" placeholder="Photo 1 caption" aria-label="Photo 1 caption" data-t="0" value="${escapeHtml(l.texts[0])}">
+             <input type="text" maxlength="60" placeholder="Photo 2 caption" aria-label="Photo 2 caption" data-t="1" value="${escapeHtml(l.texts[1])}">`}
       </div>
       <button class="font-chip" style="font-family:${escapeHtml(fontCss(l.font))}" aria-label="Font: ${escapeHtml(l.font)}">${escapeHtml(l.font)}</button>
       <button class="edit-btn" aria-label="Caption options">${icon('more')}</button>`;
@@ -629,7 +638,6 @@ function buildLayerList() {
     });
     row.querySelector('.font-chip').addEventListener('click', () => openFontPicker(l.id));
     row.querySelector('.edit-btn').addEventListener('click', () => openLayer(l.id));
-    if (l.kind === 'date') row.querySelector('.layer-main').addEventListener('click', () => openLayer(l.id));
     return row;
   }));
 }
@@ -637,10 +645,6 @@ $('#addText').addEventListener('click', () => {
   state.layers.push(textLayer());
   captionsChanged({ rebuildList: true });
   $('#layerList .layer-row:last-child input')?.focus();
-});
-$('#addDate').addEventListener('click', () => {
-  state.layers.push(dateLayer({ ...state.dateDefaults }));
-  captionsChanged({ rebuildList: true });
 });
 
 /* ---------------- captions: style sheet ---------------- */
@@ -655,7 +659,8 @@ function openLayer(id) {
 function fillLayerDialog() {
   const l = layerById(editId);
   if (!l) return;
-  $('#layerTitle').textContent = l.kind === 'date' ? `${groupLabel(l.dateFormat)} caption` : 'Text caption';
+  $('#layerTitle').textContent = l.kind === 'date' ? 'Date' : 'Caption';
+  $('#layerDelete').style.visibility = l.kind === 'date' ? 'hidden' : ''; // the date is switched off, not deleted
   $('#layerTextBlock').hidden = l.kind !== 'text';
   $('#layerDateBlock').hidden = l.kind !== 'date';
   if (l.kind === 'text') {
@@ -671,47 +676,25 @@ function fillLayerDialog() {
       captionsChanged({ rebuildList: true });
     }));
   } else {
-    const d = stampFor(l);
-    const group = DATE_FORMATS[l.dateFormat]?.group || 'date';
-    const setDate = (patch) => {
-      Object.assign(l, patch);
-      state.dateDefaults = { dateFormat: l.dateFormat, source: l.source };
-      captionsChanged({ rebuildList: true });
-      fillLayerDialog();
-    };
-    $('#dtGroup').replaceChildren(...FORMAT_GROUPS.map((g) => {
-      const b = document.createElement('button');
-      b.setAttribute('role', 'radio');
-      b.dataset.value = g.id;
-      b.setAttribute('aria-checked', String(g.id === group));
-      b.textContent = g.label;
-      // Switching what to show keeps the style family where possible (e.g. dots → dots-t24).
-      b.addEventListener('click', () => {
-        if (g.id === group) return;
-        const base = l.dateFormat.split('-')[0];
-        const pick = Object.keys(DATE_FORMATS).filter((k) => DATE_FORMATS[k].group === g.id);
-        setDate({ dateFormat: pick.find((k) => k.startsWith(`${base}-`)) || pick.find((k) => k.split('-')[0] === base) || pick[0] });
-      });
-      return b;
-    }));
-    $('#dateFormats').replaceChildren(...Object.entries(DATE_FORMATS).filter(([, f]) => f.group === group).map(([k, f]) => {
-      const b = document.createElement('button');
-      b.className = 'chip';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(l.dateFormat === k));
-      b.textContent = f.fmt(d);
-      b.addEventListener('click', () => setDate({ dateFormat: k }));
-      return b;
-    }));
+    const f = l.fmt;
+    $('#datePreview').textContent = formatDate(stampFor(l), f);
+    $('#datePreview').style.fontFamily = fontCss(l.font);
+    $$('#layerDateBlock [data-opt]').forEach((seg) => {
+      $$('button', seg).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === String(f[seg.dataset.opt]))));
+    });
+    $('#sepRow').hidden = f.month !== 'num';
+    $('#clockRow').hidden = f.show !== 'datetime';
+    $('#secondsRow').hidden = f.show !== 'datetime';
+    $('#fSeconds').checked = !!f.seconds;
     $('#dtSource').replaceChildren(...TIME_SOURCES.map((src) => {
       const b = document.createElement('button');
       b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String((l.source || 'photo') === src.id));
+      b.setAttribute('aria-checked', String(l.source === src.id));
       b.textContent = src.label;
-      b.addEventListener('click', () => setDate({ source: src.id }));
+      b.addEventListener('click', () => { l.source = src.id; captionsChanged(); fillLayerDialog(); });
       return b;
     }));
-    $('#dtSourceNote').textContent = TIME_SOURCES.find((x) => x.id === (l.source || 'photo')).detail;
+    $('#dtSourceNote').textContent = TIME_SOURCES.find((x) => x.id === l.source).detail;
   }
   $('#layerFontName').textContent = l.font;
   $('#layerFontName').style.fontFamily = fontCss(l.font);
@@ -732,6 +715,16 @@ function fillLayerDialog() {
   $$('#layerEdge button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === l.edge)));
   $$('#layerAlign button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === l.align)));
 }
+// Composable date format: each segmented control sets one option.
+$$('#layerDateBlock [data-opt]').forEach((seg) => seg.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const opt = seg.dataset.opt;
+  state.date.fmt[opt] = DATE_OPTIONS[opt].find((v) => String(v) === b.dataset.value);
+  captionsChanged();
+  fillLayerDialog();
+}));
+$('#fSeconds').addEventListener('change', (e) => { state.date.fmt.seconds = e.target.checked; captionsChanged(); fillLayerDialog(); });
 $('#layerSame').addEventListener('change', (e) => {
   const l = layerById(editId);
   if (e.target.checked) l.text = l.text || l.texts.find(Boolean) || '';
@@ -801,7 +794,7 @@ function buildFontPicker() {
   const group = FONT_GROUPS.find((g) => g.id === fontGroup);
   const sample = l?.kind === 'text'
     ? (l.same ? l.text : l.texts.find(Boolean)) || 'Summer days'
-    : formatFn(l?.dateFormat)(l ? stampFor(l) : today);
+    : formatDate(l ? stampFor(l) : today, l?.fmt);
   $('#fontList').replaceChildren(...group.fonts.map((f) => {
     const b = document.createElement('button');
     b.className = 'font-row';
@@ -991,6 +984,7 @@ function update() {
   buildPaperList();
   buildTemplateChips();
   buildLayerList();
+  buildDateRow();
   $('#exportBtn').disabled = !photos.slice(0, count()).some(Boolean);
   buildSlots();
   buildPhotoList();
@@ -998,7 +992,7 @@ function update() {
   loadFonts(fontsInUse()).then(drawPreview);
 }
 
-/* ---------------- export: highest-resolution JPEG ---------------- */
+/* ---------------- export: highest-resolution PNG (lossless) ---------------- */
 const exportDlg = $('#exportDlg');
 let exportUrl = null;
 
@@ -1030,16 +1024,16 @@ async function exportSheet() {
     const ctx = cv.getContext('2d');
     if (ctx) {
       renderSheet(ctx, sheet, used, { scale: dpi / MM_PER_INCH, color: frameColor(), marks: state.marks, sourceFor: fullSource });
-      blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 1));
+      blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
     }
     cv.width = cv.height = 0;
     if (!blob) dpi = Math.max(300, Math.floor(dpi * 0.8)); // out of memory: step down and retry
   }
   if (!blob) { exportDlg.close(); return toast('Export failed on this device.'); }
 
-  const bytes = setJpegDpi(new Uint8Array(await blob.arrayBuffer()), dpi);
-  const name = `twinmini-${layout.paper.id}-${dpi}dpi.jpg`;
-  const file = new File([bytes], name, { type: 'image/jpeg' });
+  const bytes = setPngDpi(new Uint8Array(await blob.arrayBuffer()), dpi);
+  const name = `twinmini-${layout.paper.id}-${dpi}dpi.png`;
+  const file = new File([bytes], name, { type: 'image/png' });
   if (exportUrl) URL.revokeObjectURL(exportUrl);
   exportUrl = URL.createObjectURL(file);
 

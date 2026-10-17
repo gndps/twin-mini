@@ -1,8 +1,8 @@
-// Caption layers: what is written on the frame borders, and the templates that bundle them.
-// Pure data + formatting; no DOM.
+// What is written on the frame borders: text captions plus one optional date per print,
+// and the templates that bundle them. Pure data + formatting; no DOM.
 
 export const EDGES = ['bottom', 'top', 'left', 'right'];
-// Caption distance from its centred spot in the border, in mm: negative moves toward the photo
+// Distance from the centred spot in the border, in mm: negative moves toward the photo
 // (and can overlap it), positive moves away.
 export const SHIFT = { min: -15, max: 15 };
 export const ALIGNS = ['start', 'center', 'end'];
@@ -17,153 +17,190 @@ export const CAPTION_COLORS = [
   { id: 'white', label: 'White', value: '#FFFFFF' },
 ];
 
+/* ---------------- date formatting: composable options ---------------- */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const p2 = (n) => String(n).padStart(2, '0');
 
-// Building blocks, combined below into date, time, and date-and-time formats.
-const D = {
-  dots: (d) => `${d.getFullYear()}.${p2(d.getMonth() + 1)}.${p2(d.getDate())}`,
-  stamp: (d) => `'${p2(d.getFullYear() % 100)} ${p2(d.getMonth() + 1)} ${p2(d.getDate())}`,
-  iso: (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`,
-  dmy: (d) => `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`,
-  mdy: (d) => `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`,
+/** Every choice the date formatter understands, with its allowed values (first = default). */
+export const DATE_OPTIONS = {
+  show: ['date', 'datetime'],
+  order: ['ymd', 'dmy', 'mdy'],
+  month: ['num', 'short', 'long'],
+  year: ['full', 'short', 'none'],
+  sep: ['.', '/', '-', ' '],
+  weekday: ['none', 'short', 'long'],
+  clock: ['24', '12'],
+  seconds: [false, true],
 };
-const T = {
-  t24: (d) => `${p2(d.getHours())}:${p2(d.getMinutes())}`,
-  t12: (d) => `${d.getHours() % 12 || 12}:${p2(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`,
-};
+export const defaultDateFormat = () => Object.fromEntries(Object.entries(DATE_OPTIONS).map(([k, v]) => [k, v[0]]));
 
-/** Every format has a group: what it shows (date, time, or both). Ids are stored, so never rename. */
-export const DATE_FORMATS = {
-  // date
-  dots: { group: 'date', fmt: D.dots },
-  stamp: { group: 'date', fmt: D.stamp },
-  iso: { group: 'date', fmt: D.iso },
-  dmy: { group: 'date', fmt: D.dmy },
-  mdy: { group: 'date', fmt: D.mdy },
-  slash: { group: 'date', fmt: (d) => `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}` },
-  us: { group: 'date', fmt: (d) => `${p2(d.getMonth() + 1)}/${p2(d.getDate())}/${d.getFullYear()}` },
-  month: { group: 'date', fmt: (d) => `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}` },
-  weekday: { group: 'date', fmt: (d) => `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}` },
-  long: { group: 'date', fmt: (d) => `${DAYS_LONG[d.getDay()]}, ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}` },
-  year: { group: 'date', fmt: (d) => String(d.getFullYear()) },
-  // time
-  t24: { group: 'time', fmt: T.t24 },
-  t12: { group: 'time', fmt: T.t12 },
-  t24s: { group: 'time', fmt: (d) => `${T.t24(d)}:${p2(d.getSeconds())}` },
-  tdot: { group: 'time', fmt: (d) => `${p2(d.getHours())}.${p2(d.getMinutes())}` },
-  // date & time
-  'dots-t24': { group: 'datetime', fmt: (d) => `${D.dots(d)} ${T.t24(d)}` },
-  'stamp-t24': { group: 'datetime', fmt: (d) => `${D.stamp(d)}  ${T.t24(d)}` },
-  'iso-t24': { group: 'datetime', fmt: (d) => `${D.iso(d)} ${T.t24(d)}` },
-  'dmy-t12': { group: 'datetime', fmt: (d) => `${D.dmy(d)}, ${T.t12(d)}` },
-  'mdy-t12': { group: 'datetime', fmt: (d) => `${D.mdy(d)} · ${T.t12(d)}` },
-  'weekday-t24': { group: 'datetime', fmt: (d) => `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}, ${T.t24(d)}` },
-};
-export const FORMAT_GROUPS = [
-  { id: 'date', label: 'Date' },
-  { id: 'time', label: 'Time' },
-  { id: 'datetime', label: 'Date & time' },
-];
-export const formatFn = (id) => (DATE_FORMATS[id] || DATE_FORMATS.dots).fmt;
-export const groupLabel = (id) => FORMAT_GROUPS.find((g) => g.id === (DATE_FORMATS[id] || DATE_FORMATS.dots).group).label;
+function sanitizeFormat(f) {
+  const out = defaultDateFormat();
+  for (const [k, allowed] of Object.entries(DATE_OPTIONS)) if (f && allowed.includes(f[k])) out[k] = f[k];
+  return out;
+}
 
-/** Where a date caption's timestamp comes from. */
+/**
+ * Build the date text from independent choices:
+ *  numeric month → parts joined by the separator (2026.10.17, 17/10/26, '26 10 17);
+ *  named month → written style (17 Oct 2026, Oct 17, 2026, 2026 October 17);
+ *  optional weekday in front, optional time (24 h or 12 h AM/PM, with or without seconds) after.
+ */
+export function formatDate(d, fmt) {
+  const f = sanitizeFormat(fmt);
+  const day = String(d.getDate());
+  const year = f.year === 'full' ? String(d.getFullYear()) : f.year === 'short' ? `'${p2(d.getFullYear() % 100)}` : '';
+  let date;
+  if (f.month === 'num') {
+    const parts = { y: year, m: p2(d.getMonth() + 1), d: p2(d.getDate()) };
+    date = [...f.order].map((k) => parts[k]).filter(Boolean).join(f.sep);
+  } else {
+    const mon = (f.month === 'short' ? MONTHS : MONTHS_LONG)[d.getMonth()];
+    if (f.order === 'mdy') date = year ? `${mon} ${day}, ${year}` : `${mon} ${day}`;
+    else if (f.order === 'ymd') date = [year, mon, day].filter(Boolean).join(' ');
+    else date = [day, mon, year].filter(Boolean).join(' ');
+  }
+  if (f.weekday !== 'none') date = `${(f.weekday === 'short' ? DAYS : DAYS_LONG)[d.getDay()]}, ${date}`;
+  if (f.show === 'datetime') {
+    const h = d.getHours();
+    const sec = f.seconds ? `:${p2(d.getSeconds())}` : '';
+    const time = f.clock === '12'
+      ? `${h % 12 || 12}:${p2(d.getMinutes())}${sec} ${h < 12 ? 'AM' : 'PM'}`
+      : `${p2(h)}:${p2(d.getMinutes())}${sec}`;
+    date = `${date}  ${time}`;
+  }
+  return date;
+}
+
+/** Where the date's timestamp comes from. */
 export const TIME_SOURCES = [
   { id: 'photo', label: 'Photo', detail: 'When the photo was taken (or its file date)' },
   { id: 'now', label: 'Now', detail: 'Today’s date and the current time' },
 ];
 
+/* ---------------- captions and the date ---------------- */
 let seq = 0;
 const uid = () => `c${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-/** A date/time caption: by default the photo's own timestamp (EXIF capture time, else file time). */
-export function dateLayer(over = {}) {
-  return { id: uid(), kind: 'date', dateFormat: 'dots', source: 'photo', font: 'Caveat', size: 4.6, edge: 'bottom', align: 'end', color: 'auto', shift: 0, ...over };
-}
+const STYLE_DEFAULTS = { font: 'Caveat', size: 6, edge: 'bottom', align: 'center', color: 'auto', shift: 0 };
+
 /** A free-text caption; by default each photo gets its own text. */
 export function textLayer(over = {}) {
-  return { id: uid(), kind: 'text', same: false, text: '', texts: ['', ''], font: 'Caveat', size: 6, edge: 'bottom', align: 'center', color: 'auto', shift: 0, ...over };
+  return { id: uid(), kind: 'text', same: false, text: '', texts: ['', ''], ...STYLE_DEFAULTS, ...over };
+}
+/** The one date per print: on by default, the photo's own timestamp, bottom right. */
+export function dateSettings(over = {}) {
+  const { fmt, ...rest } = over;
+  return { id: 'date', kind: 'date', on: true, source: 'photo', ...STYLE_DEFAULTS, size: 4.6, align: 'end', ...rest, fmt: { ...defaultDateFormat(), ...fmt } };
 }
 
 export const BUILTIN_TEMPLATES = [
-  { id: 'b-date', name: 'Date', layers: () => [dateLayer()] },
-  { id: 'b-note', name: 'Note', layers: () => [textLayer()] },
-  { id: 'b-note-date', name: 'Note + date', layers: () => [textLayer({ size: 5.6 }), dateLayer({ size: 3.6, font: 'Kalam', color: 'grey' })] },
-  { id: 'b-datetime', name: 'Date & time', layers: () => [dateLayer({ dateFormat: 'dots-t24', size: 4.2 })] },
-  { id: 'b-stamp', name: 'Date stamp', layers: () => [dateLayer({ dateFormat: 'stamp', font: 'VT323', size: 4.4, color: 'stamp', align: 'end' })] },
-  { id: 'b-typed', name: 'Typed', layers: () => [textLayer({ font: 'Special Elite', size: 3.8, align: 'start' }), dateLayer({ font: 'Special Elite', size: 3, align: 'end', color: 'grey', dateFormat: 'dmy' })] },
-  { id: 'b-side', name: 'Side date', layers: () => [dateLayer({ edge: 'right', align: 'end', size: 3.4, font: 'IBM Plex Mono', color: 'grey', dateFormat: 'dots' })] },
-  { id: 'b-none', name: 'None', layers: () => [] },
+  { id: 'b-date', name: 'Date', captions: () => [], date: () => dateSettings() },
+  { id: 'b-note', name: 'Note', captions: () => [textLayer()], date: () => dateSettings({ on: false }) },
+  { id: 'b-note-date', name: 'Note + date', captions: () => [textLayer({ size: 5.6 })], date: () => dateSettings({ size: 3.6, font: 'Kalam', color: 'grey' }) },
+  { id: 'b-datetime', name: 'Date & time', captions: () => [], date: () => dateSettings({ size: 4.2, fmt: { show: 'datetime' } }) },
+  { id: 'b-stamp', name: 'Date stamp', captions: () => [], date: () => dateSettings({ font: 'VT323', size: 4.4, color: 'stamp', fmt: { year: 'short', sep: ' ' } }) },
+  { id: 'b-typed', name: 'Typed', captions: () => [textLayer({ font: 'Special Elite', size: 3.8, align: 'start' })], date: () => dateSettings({ font: 'Special Elite', size: 3, color: 'grey', fmt: { order: 'dmy', month: 'short' } }) },
+  { id: 'b-side', name: 'Side date', captions: () => [], date: () => dateSettings({ edge: 'right', size: 3.4, font: 'IBM Plex Mono', color: 'grey' }) },
+  { id: 'b-none', name: 'None', captions: () => [], date: () => dateSettings({ on: false }) },
 ];
 
-export const defaultLayers = () => BUILTIN_TEMPLATES[0].layers();
+export const defaultCaptions = () => BUILTIN_TEMPLATES[0].captions();
+export const defaultDate = () => BUILTIN_TEMPLATES[0].date();
 
-/** Copy layers with fresh ids (templates must never share layer objects with the sheet). */
+/** Copy captions with fresh ids (templates must never share objects with the sheet). */
 export const cloneLayers = (layers) => layers.map((l) => ({ ...l, texts: l.texts ? [...l.texts] : undefined, id: uid() }));
+export const cloneDate = (d) => ({ ...d, fmt: { ...d.fmt } });
 
 /**
- * Turn layers into concrete text for one frame.
- * @param {number} i frame index
- * @param {Date} date the photo's timestamp for this frame
- * @param {Date} [now] the moment used by "Now" captions (defaults to the current time)
+ * Concrete lines for one frame: its text captions, then the date if it is on.
+ * @param {Date} photoDate the photo's timestamp; @param {Date} [now] used when the date source is "now"
  */
-export function resolveLayers(layers, i, date, now = new Date()) {
-  return layers.map((l) => {
-    let text;
-    if (l.kind === 'date') text = formatFn(l.dateFormat)(l.source === 'now' ? now : date);
-    else text = l.same ? l.text : (l.texts?.[i] ?? '');
-    return { ...l, text: (text || '').trim() };
-  }).filter((l) => l.text);
+export function resolveCaptions(layers, date, i, photoDate, now = new Date()) {
+  const lines = layers.map((l) => ({ ...l, text: ((l.same ? l.text : l.texts?.[i]) || '').trim() }));
+  if (date?.on) lines.push({ ...date, text: formatDate(date.source === 'now' ? now : photoDate, date.fmt) });
+  return lines.filter((l) => l.text);
 }
 
-/** Keep stored layers valid when loading from storage written by an older version. */
+function sanitizeStyle(l, base) {
+  return {
+    ...base, ...l,
+    edge: EDGES.includes(l.edge) ? l.edge : base.edge,
+    align: ALIGNS.includes(l.align) ? l.align : base.align,
+    size: Number.isFinite(l.size) ? Math.min(14, Math.max(1.5, l.size)) : base.size,
+    shift: Number.isFinite(l.shift) ? Math.min(SHIFT.max, Math.max(SHIFT.min, l.shift)) : 0,
+  };
+}
+
+/** Text captions from storage or template text; date entries are dropped (see migrateDate). */
 export function sanitizeLayers(layers) {
   if (!Array.isArray(layers)) return null;
-  return layers.filter((l) => l && (l.kind === 'date' || l.kind === 'text')).map((l) => ({
-    ...(l.kind === 'date' ? dateLayer() : textLayer()), ...l,
-    edge: EDGES.includes(l.edge) ? l.edge : 'bottom',
-    align: ALIGNS.includes(l.align) ? l.align : 'center',
-    size: Number.isFinite(l.size) ? Math.min(14, Math.max(1.5, l.size)) : 4.5,
-    shift: Number.isFinite(l.shift) ? Math.min(SHIFT.max, Math.max(SHIFT.min, l.shift)) : 0,
-    ...(l.kind === 'date' ? {
-      dateFormat: DATE_FORMATS[l.dateFormat] ? l.dateFormat : 'dots',
-      source: l.source === 'now' ? 'now' : 'photo',
-    } : {}),
-  }));
+  return layers.filter((l) => l?.kind === 'text').map((l) => {
+    const t = sanitizeStyle(l, textLayer());
+    return { ...t, texts: [t.texts?.[0] ?? '', t.texts?.[1] ?? ''] };
+  });
+}
+
+// Older versions stored dates as caption layers with a named format; map them across.
+const LEGACY_FORMATS = {
+  dots: {}, iso: { sep: '-' }, slash: { order: 'dmy', sep: '/' }, us: { order: 'mdy', sep: '/' },
+  stamp: { year: 'short', sep: ' ' }, dmy: { order: 'dmy', month: 'short' }, mdy: { order: 'mdy', month: 'short' },
+  month: { order: 'dmy', month: 'long' }, weekday: { order: 'dmy', month: 'short', year: 'none', weekday: 'short' },
+  long: { order: 'dmy', month: 'long', weekday: 'long' }, year: {},
+  t24: { show: 'datetime' }, t12: { show: 'datetime', clock: '12' }, t24s: { show: 'datetime', seconds: true }, tdot: { show: 'datetime' },
+  'dots-t24': { show: 'datetime' }, 'stamp-t24': { show: 'datetime', year: 'short', sep: ' ' }, 'iso-t24': { show: 'datetime', sep: '-' },
+  'dmy-t12': { show: 'datetime', order: 'dmy', month: 'short', clock: '12' }, 'mdy-t12': { show: 'datetime', order: 'mdy', month: 'short', clock: '12' },
+  'weekday-t24': { show: 'datetime', order: 'dmy', month: 'short', year: 'none', weekday: 'short' },
+};
+
+/** The date settings from stored data: a `date` object, or the first legacy date caption, or off. */
+export function migrateDate(date, legacyLayers) {
+  if (date && typeof date === 'object') {
+    const s = sanitizeStyle(date, dateSettings());
+    return { ...s, id: 'date', kind: 'date', on: date.on !== false, source: date.source === 'now' ? 'now' : 'photo', fmt: sanitizeFormat({ ...defaultDateFormat(), ...date.fmt }) };
+  }
+  const old = Array.isArray(legacyLayers) ? legacyLayers.find((l) => l?.kind === 'date') : null;
+  if (!old) return null;
+  const { dateFormat, ...style } = old;
+  return migrateDate({ ...style, on: true, fmt: LEGACY_FORMATS[dateFormat] || {} });
 }
 
 /* ---------------- template text format (export / import / site templates) ---------------- */
-// One template:  {"twinmini":"caption-template","version":1,"name":"…","captions":[…]}
-// Several: an array of those, or {"templates":[…]}. Caption fields: kind ("date" | "text"),
-// font, size (mm), edge, align, color, shift (mm, − = toward the photo), dateFormat + source ("photo" | "now") (date),
-// same/text/texts (text).
+// One template:  {"twinmini":"caption-template","version":2,"name":"…","captions":[…],"date":{…}}
+// Several: an array of those, or {"templates":[…]}.
+// Caption fields: font, size (mm), edge, align, color, shift (mm, − = toward the photo),
+//   same + text, or texts (one per photo).
+// Date fields: on, source ("photo" | "now"), the same style fields, and fmt:
+//   { show, order, month, year, sep, weekday, clock, seconds } (see DATE_OPTIONS).
 export const TEMPLATE_FORMAT = 'caption-template';
-const KEEP = ['kind', 'font', 'size', 'edge', 'align', 'color', 'shift', 'dateFormat', 'source', 'same', 'text', 'texts'];
+const STYLE_KEYS = ['font', 'size', 'edge', 'align', 'color', 'shift'];
 
-export function templateToJson(name, layers) {
+export function templateToJson(name, layers, date) {
+  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
   return {
-    twinmini: TEMPLATE_FORMAT, version: 1, name,
-    captions: layers.map((l) => Object.fromEntries(KEEP.filter((k) => l[k] !== undefined
-      && !(l.kind === 'date' && ['same', 'text', 'texts'].includes(k))
-      && !(l.kind === 'text' && ['dateFormat', 'source'].includes(k))).map((k) => [k, l[k]]))),
+    twinmini: TEMPLATE_FORMAT, version: 2, name,
+    captions: layers.map((l) => ({ kind: 'text', ...pick(l, [...STYLE_KEYS, 'same', 'text', 'texts']) })),
+    date: date ? { on: !!date.on, source: date.source, ...pick(date, STYLE_KEYS), fmt: { ...date.fmt } } : { on: false },
   };
 }
 export const exportTemplatesText = (list) =>
-  JSON.stringify(list.length === 1 ? templateToJson(list[0].name, list[0].layers) : list.map((t) => templateToJson(t.name, t.layers)), null, 2);
+  JSON.stringify(list.length === 1 ? templateToJson(list[0].name, list[0].layers, list[0].date) : list.map((t) => templateToJson(t.name, t.layers, t.date)), null, 2);
 
-/** Parse exported text back into [{name, layers}]; throws a readable Error on bad input. */
+/** Parse exported text back into [{name, layers, date}]; throws a readable Error on bad input. */
 export function parseTemplatesText(text) {
   let data;
   try { data = JSON.parse(String(text).trim()); } catch { throw new Error('That isn’t template text (invalid JSON).'); }
   const list = Array.isArray(data) ? data : Array.isArray(data?.templates) ? data.templates : [data];
   const out = list.map((t) => {
     if (!t || typeof t !== 'object' || !Array.isArray(t.captions)) throw new Error('Missing "captions" list.');
-    const layers = sanitizeLayers(t.captions);
-    return { name: String(t.name || 'Imported').slice(0, 30), layers };
+    return {
+      name: String(t.name || 'Imported').slice(0, 30),
+      layers: sanitizeLayers(t.captions),
+      date: migrateDate(t.date, t.captions) || dateSettings({ on: false }),
+    };
   });
   if (!out.length) throw new Error('No templates found.');
   return out;
