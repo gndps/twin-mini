@@ -1175,6 +1175,47 @@ async function exportSheet() {
 }
 $('#exportBtn').addEventListener('click', exportSheet);
 
+/* ---------------- bottom sheets: drag the handle (phones) ---------------- */
+// On phones every dialog is a bottom sheet with a grab handle. Dragging the handle (or the
+// title bar) down closes it, dragging up expands a half-height sheet to full height, and a
+// short drag springs back.
+const phone = matchMedia('(max-width: 860px)');
+function attachSheetDrag(dlg) {
+  const head = dlg.querySelector('.sheet-head');
+  if (!head || !dlg.querySelector('.grabber')) return; // only sheets that show a handle
+  let start = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (!phone.matches || e.target.closest('button')) return;
+    start = { y: e.clientY, t: performance.now() };
+    head.setPointerCapture(e.pointerId);
+    dlg.style.transition = 'none';
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    dlg.style.transform = `translateY(${dy > 0 ? dy : dy * 0.25}px)`; // resist upward pulls
+  });
+  const end = (e) => {
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    const v = dy / Math.max(1, performance.now() - start.t); // px per ms
+    start = null;
+    dlg.style.transition = 'transform .28s cubic-bezier(.32,.72,0,1)';
+    const h = dlg.getBoundingClientRect().height;
+    if (dy > Math.min(140, h * 0.3) || v > 0.6) {
+      dlg.style.transform = `translateY(${h}px)`;
+      setTimeout(() => { dlg.close(); dlg.style.transform = ''; dlg.style.transition = ''; dlg.classList.remove('expanded'); }, 240);
+      return;
+    }
+    if (dy < -50 || v < -0.6) dlg.classList.add('expanded');
+    dlg.style.transform = '';
+  };
+  head.addEventListener('pointerup', end);
+  head.addEventListener('pointercancel', end);
+  dlg.addEventListener('close', () => { dlg.classList.remove('expanded'); dlg.style.transform = ''; });
+}
+$$('dialog').forEach(attachSheetDrag);
+
 /* ---------------- dialogs, files, drag & drop ---------------- */
 $$('[data-open]').forEach((b) => b.addEventListener('click', () => $(`#${b.dataset.open}`).showModal()));
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
