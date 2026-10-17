@@ -511,7 +511,12 @@ input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; }
   font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); min-height: 88px;
 }
 .import-box textarea:focus { outline: 2px solid var(--ink); outline-offset: -1px; }
-.import-actions { display: flex; justify-content: flex-end; }
+.import-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+.file-btn { cursor: pointer; }
+.help-label { margin: 0 22px 6px; }
+.help-import { margin: 0 22px 14px; }
+.theme-export .list-label { margin-top: 4px; }
+.theme-export .list-foot { margin-top: 6px; }
 .list-foot code { font-size: 12px; background: var(--card); padding: 1px 5px; border-radius: 4px; }
 .tpl-row .exp { color: var(--ink-2); }
 
