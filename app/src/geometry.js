@@ -67,47 +67,48 @@ export const ASPECTS = [
 export const aspectOf = (id) => ASPECTS.find((a) => a.id === id) || null;
 
 export const FORMATS = {
-  two: { label: 'Two Minis', aspect: 'mini', size: 56 / 74 },       // half sheet: 9 mm borders on a postcard half
-  one: { label: 'One Wide', aspect: '2x3', size: 0.82 },
+  two: { label: 'Two Minis', aspect: 'mini', count: 2 },
+  one: { label: 'One Wide', aspect: '2x3', count: 1 },
 };
-const PORTRAIT_ONE_SIZE = 0.75;
+export const ORIENTATIONS = ['portrait', 'landscape'];
 
-/** Width ÷ height of a preset shape (rotated on its side for landscape One Wide unless un-flipped). */
-export function windowRatio({ format = 'two', orientation = 'landscape', aspect, flip } = {}) {
-  const preset = aspectOf(aspect) || aspectOf(FORMATS[format].aspect);
-  let a = preset.w / preset.h;
-  if (format === 'one' && orientation === 'landscape' && (flip ?? true)) a = 1 / a;
-  return a;
+// Photo-window corner rounding, as a fraction of the window's short side. Instax film masks the
+// picture with very slightly rounded corners: about 0.23 mm on the 46 mm side of a Mini image,
+// measured from high-resolution scans of real Mini and Square prints (Fujifilm publishes no figure).
+export const CORNER = { instax: 0.005, max: 0.12 };
+
+/** Default photo width: a fraction of the largest window of this shape that fits the card. */
+export function defaultSize(format, orientation) {
+  if (format === 'one') return orientation === 'portrait' ? 0.75 : 0.82;
+  return orientation === 'landscape' ? 0.82 : 56 / 74; // half sheet: 9 mm borders on a postcard half
+}
+
+/**
+ * Width ÷ height of a preset shape on a card. A shape follows the card: upright on a portrait
+ * card, on its side on a landscape one; `turn` turns it the other way.
+ */
+export function windowRatio(aspect, cardW, cardH, turn = false) {
+  const preset = aspectOf(aspect) || ASPECTS[0];
+  const a = preset.w / preset.h;
+  return (cardW > cardH) !== !!turn ? 1 / a : a;
 }
 
 const r = (n) => Math.round(n * 1000) / 1000;
 
-/** Default width (fraction of the largest preset window that fits) for a format/orientation. */
-export function defaultSize(format, orientation) {
-  return format === 'one' && orientation === 'portrait' ? PORTRAIT_ONE_SIZE : FORMATS[format].size;
-}
-
 /**
- * Lay out the sheet.
- * - two: the sheet is cut down the middle into two cards; one: a single card fills the sheet.
+ * Lay out one print (card) in its own upright frame, W × H mm.
  * - The photo window is always centred left to right.
  *   `w` = window width as a fraction of the card width (grows symmetrically);
  *   `h` = window height as a fraction of the card height (custom shapes only; presets derive it
  *   from the width); `top` = top border as a fraction of the card height. Height changes keep the
  *   top border where it is. Nulls give the defaults: the preset at its default size with the
  *   Instax look (top border ≈ side border, the rest of the height is the chin).
- * - one + portrait: the sheet is used upright (the SELPHY app rotates it onto the paper).
+ * - `corner` rounds the window corners (fraction of its short side; null = Instax).
  */
-export function computeLayout({ paperId = DEFAULT_PAPER, customPaper, format = 'two', orientation = 'landscape', aspect, flip, w = null, h = null, top = null } = {}) {
-  const base = resolvePaper(paperId, customPaper);
-  const portrait = format === 'one' && orientation === 'portrait';
-  const paper = { ...base, w: portrait ? base.h : base.w, h: portrait ? base.w : base.h, portrait };
-  const count = format === 'one' ? 1 : 2;
-  const W = paper.w / count, H = paper.h;
-
+export function cardLayout({ W, H, aspect = 'mini', turn = false, w = null, h = null, top = null, corner = null, size = 56 / 74 }) {
   const custom = aspect === 'custom';
-  const a = windowRatio({ format, orientation, aspect: custom ? FORMATS[format].aspect : aspect, flip });
-  let winW = w == null ? Math.min(W, H * a) * defaultSize(format, orientation) : clamp(w, 0.15, 1) * W;
+  const a = windowRatio(custom ? 'mini' : aspect, W, H, turn);
+  let winW = w == null ? Math.min(W, H * a) * size : clamp(w, 0.15, 1) * W;
   let winH = custom && h != null ? clamp(h, 0.08, 1) * H : winW / a;
   if (winH > H) { winH = H; if (!custom) winW = H * a; }
 
@@ -120,23 +121,42 @@ export function computeLayout({ paperId = DEFAULT_PAPER, customPaper, format = '
     if (topMm + winH > H) { winH = H - topMm; if (!custom) winW = winH * a; }
   }
   const side = (W - winW) / 2;
-
-  const cards = Array.from({ length: count }, (_, i) => {
-    const x = i * W;
-    const win = { x: r(x + side), y: r(topMm), w: r(winW), h: r(winH) };
-    return {
-      x: r(x), y: 0, w: r(W), h: r(H), win,
-      // Border bands that captions can sit in.
-      top: { x: r(x), y: 0, w: r(W), h: win.y },
-      chin: { x: r(x), y: r(win.y + win.h), w: r(W), h: r(H - win.y - win.h) },
-      left: { x: r(x), y: 0, w: r(side), h: r(H) },
-      right: { x: r(x + W - side), y: 0, w: r(side), h: r(H) },
-    };
-  });
+  const win = { x: r(side), y: r(topMm), w: r(winW), h: r(winH) };
+  const round = (corner == null ? CORNER.instax : clamp(corner, 0, CORNER.max)) * Math.min(win.w, win.h);
   return {
-    paper, cutX: count === 2 ? W : null, cards,
-    ratio: winW / winH, w: winW / W, h: winH / H, top: topMm / H, card: { w: W, h: H },
+    w: r(W), h: r(H), win, radius: r(round),
+    chin: { y: r(win.y + win.h), h: r(H - win.y - win.h) },
+    ratio: winW / winH, fw: winW / W, fh: winH / H, ftop: topMm / H,
   };
+}
+
+/**
+ * Lay out the sheet: `two` cuts it down the middle into two cards, `one` fills it with one.
+ * Each print has its own orientation. A print whose orientation differs from its half of the
+ * sheet is turned a quarter (rot 90) to fit; One Wide portrait uses the sheet upright instead
+ * (the SELPHY app rotates it onto the paper).
+ * Returns slots in sheet mm: { x, y, w, h, rot, card } where card is the print's own layout.
+ */
+export function sheetLayout({ paperId = DEFAULT_PAPER, customPaper, format = 'two', prints = [] } = {}) {
+  const base = resolvePaper(paperId, customPaper);
+  const n = format === 'one' ? 1 : 2;
+  const upright = format === 'one' && prints[0]?.orientation === 'portrait';
+  const paper = { ...base, w: upright ? base.h : base.w, h: upright ? base.w : base.h, portrait: upright };
+  const SW = paper.w / n, SH = paper.h;
+  const slots = Array.from({ length: n }, (_, i) => {
+    const p = prints[i] || {};
+    const land = p.orientation === 'landscape';
+    const rot = SW !== SH && (SW > SH) !== land ? 90 : 0;
+    const [W, H] = rot ? [SH, SW] : [SW, SH];
+    const card = cardLayout({ W, H, ...(p.layout || {}), aspect: p.layout?.aspect || FORMATS[format].aspect, size: defaultSize(format, p.orientation) });
+    return { x: r(i * SW), y: 0, w: r(SW), h: r(SH), rot, card };
+  });
+  return { paper, cutX: n === 2 ? SW : null, slots };
+}
+
+/** Map a point in a card's own mm to sheet mm (inverse of how renderSheet places the card). */
+export function cardToSheet(slot, x, y) {
+  return slot.rot ? { x: slot.x + slot.w - y, y: slot.y + x } : { x: slot.x + x, y: slot.y + y };
 }
 
 export const mmToPx = (mm, dpi) => (mm / MM_PER_INCH) * dpi;

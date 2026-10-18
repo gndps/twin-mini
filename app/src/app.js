@@ -1,47 +1,27 @@
-import { computeLayout, PAPERS, OTHER_PAPERS, CUSTOM_PAPER, resolvePaper, DEFAULT_PAPER, ASPECTS, FORMATS, aspectOf, cropRect, effectiveDpi, chooseDpi, sheetPixels, clamp, MM_PER_INCH } from './geometry.js';
-import { renderSheet, makeSourceCache, FRAME_COLORS } from './render.js';
+import { PAPERS, OTHER_PAPERS, CUSTOM_PAPER, resolvePaper, sheetLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, MM_PER_INCH } from './geometry.js';
+import { renderSheet, makeSourceCache } from './render.js';
 import { setPngDpi } from './dpi.js';
 import { readExifDate } from './exif.js';
-import { FONT_GROUPS, fontCss, loadFonts } from './fonts.js';
+import { loadFonts } from './fonts.js';
+import { DATE_OPTIONS, TIME_SOURCES, formatDate } from './captions.js';
 import {
-  CAPTION_COLORS, DATE_OPTIONS, TIME_SOURCES, formatDate, effectiveShift,
-  cloneLayers, cloneDate, dateSettings, defaultCaptions, defaultDate, migrateDate,
-  resolveCaptions, sanitizeLayers, textLayer, exportTemplatesText, parseTemplatesText,
-} from './captions.js';
+  defaultDoc, sanitizeDoc, migrateV2State, defaultCrop, newId, clonePrint, layoutsLinked,
+  exportThemesText, parseThemesText, legacyDoc, cardOf, remapElements,
+} from './model.js';
+import { putBlob, deleteBlob, getBlob, allKeys } from './store.js';
+import { createEditor } from './editor.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const PREVIEW_LONG_SIDE = 2400;
-const STATE_KEY = 'twinmini:v2';
+const STATE_KEY = 'twinmini:v3';
+const OLD_STATE_KEY = 'twinmini:v2';
 const TEMPLATES_KEY = 'twinmini:templates';
 
 // Canvas pixel budget: iOS/Safari caps canvases at 16.7 MP; desktop browsers allow far more.
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent) || /iP(hone|ad|od)/.test(navigator.userAgent);
 const MAX_PIXELS = isSafari ? 16_777_216 : 120_000_000;
-
-// Each format keeps its own shape, size and position, saved independently.
-const defaultLayoutFor = (f) => ({
-  aspect: FORMATS[f].aspect, w: null, h: null, top: null,
-  ...(f === 'one' ? { orientation: 'landscape', flip: true } : {}),
-});
-const defaultLayout = () => ({ two: defaultLayoutFor('two'), one: defaultLayoutFor('one') });
-const defaults = () => ({
-  format: 'two', layout: defaultLayout(),
-  color: 'white', marks: true, paperId: DEFAULT_PAPER, customPaper: { w: 148, h: 100 }, templateId: null,
-  tab: 'frame', // settings tab: frame | captions | paper
-  layers: defaultCaptions(), // text captions
-  date: defaultDate(),       // the one date per print
-});
-const state = loadState();
-let templates = loadTemplates();
-let siteTemplates = [];
-const photos = [null, null];
-let selected = null;
-
-const fullSource = makeSourceCache();
-const previewCache = makeSourceCache();
-const previewSource = (p, pxPerSrc) => previewCache({ bitmap: p.preview }, pxPerSrc * (p.width / p.preview.width));
 
 /* ---------------- persistence (everything lives in this browser) ---------------- */
 function readJson(key) {
@@ -50,90 +30,70 @@ function readJson(key) {
 function writeJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
 }
-/** Copy the valid look settings (frame, layout, paper) from `saved` onto `s`. */
-function readLook(s, saved) {
-  if (FRAME_COLORS.some((c) => c.id === saved.color)) s.color = saved.color;
-  if (typeof saved.marks === 'boolean') s.marks = saved.marks;
-  if (PAPERS[saved.paperId] || OTHER_PAPERS[saved.paperId] || saved.paperId === 'custom') s.paperId = saved.paperId;
-  if (Number.isFinite(saved.customPaper?.w) && Number.isFinite(saved.customPaper?.h)) s.customPaper = { w: saved.customPaper.w, h: saved.customPaper.h };
-  for (const f of ['two', 'one']) {
-    const L = saved.layout?.[f];
-    if (!L) continue;
-    if (L.aspect === 'custom' || aspectOf(L.aspect)) s.layout[f].aspect = L.aspect;
-    if (f === 'one' && typeof L.flip === 'boolean') s.layout.one.flip = L.flip;
-    for (const k of ['w', 'h', 'top']) if (Number.isFinite(L[k])) s.layout[f][k] = clamp(L[k], 0, 1);
-    if (s.layout[f].aspect === 'custom' && (s.layout[f].w == null || s.layout[f].h == null)) s.layout[f].aspect = FORMATS[f].aspect;
-    if (f === 'one' && (L.orientation === 'portrait' || L.orientation === 'landscape')) s.layout.one.orientation = L.orientation;
-  }
-  return s;
-}
-/** The look part of a theme: everything except captions, date and the open tab. */
-const currentLook = () => JSON.parse(JSON.stringify({
-  format: state.format, layout: state.layout, color: state.color, marks: state.marks, paperId: state.paperId, customPaper: state.customPaper,
-}));
-function loadState() {
-  const s = defaults();
+function loadDoc() {
   const saved = readJson(STATE_KEY);
-  if (!saved) return s;
-  // Every session opens on Two Minis; any custom size/position is kept.
-  readLook(s, saved);
-  if (['frame', 'captions', 'paper'].includes(saved.tab)) s.tab = saved.tab;
-  const layers = sanitizeLayers(saved.layers);
-  if (layers) { s.layers = layers; s.templateId = saved.templateId ?? null; }
-  s.date = migrateDate(saved.date, saved.layers) || s.date;
-  return s;
+  if (saved) return sanitizeDoc(saved);
+  const old = readJson(OLD_STATE_KEY);
+  if (old) { try { return migrateV2State(old); } catch { /* start fresh */ } }
+  return defaultDoc();
 }
-const saveState = () => writeJson(STATE_KEY, state);
 function loadTemplates() {
-  const t = readJson(TEMPLATES_KEY);
-  return Array.isArray(t) ? t.filter((x) => x?.name).map((x) => ({
-    ...x, layers: sanitizeLayers(x.layers) || [], date: migrateDate(x.date, x.layers) || dateSettings({ on: false }),
-  })) : [];
+  const list = readJson(TEMPLATES_KEY);
+  if (!Array.isArray(list)) return [];
+  return list.filter((t) => t?.name).map((t) => {
+    if (t.doc) return { id: t.id, name: t.name, doc: sanitizeDoc(t.doc), elementsOnly: !!t.elementsOnly };
+    // Saved by an older version: captions, a date and maybe a look.
+    return { id: t.id, name: t.name, doc: legacyDoc(t.look, t.layers, t.date), elementsOnly: !t.look };
+  });
 }
-const saveTemplates = () => writeJson(TEMPLATES_KEY, templates);
 
-/* ---------------- derived ---------------- */
-const frameColor = () => FRAME_COLORS.find((c) => c.id === state.color) || FRAME_COLORS[0];
-const lay = () => state.layout[state.format];
-const currentLayout = () => computeLayout({ paperId: state.paperId, customPaper: state.customPaper, format: state.format, ...lay() });
-const count = () => (state.format === 'two' ? 2 : 1);
+/* ---------------- state ---------------- */
+let doc = loadDoc();
+let templates = loadTemplates();
+let siteTemplates = [];
+const photos = [null, null];   // shared by both formats: photo 1 and photo 2
+const assets = new Map();      // picture stickers: id → { img, dataUrl }
 const today = new Date();
-function renderSlots({ keepEmpty = false } = {}) {
-  return Array.from({ length: count() }, (_, i) => ({
-    photo: photos[i],
-    captions: resolveCaptions(state.layers, state.date, i, photos[i]?.date || today, new Date(), { keepEmpty }),
-  }));
-}
-function photoDpi(photo, win) {
-  const c = cropRect(photo.width, photo.height, photo.rot, win.w / win.h, photo.zoom, photo.cx, photo.cy);
-  return { dpi: effectiveDpi(c.w, win.w), crop: c };
-}
-function quality(dpi) {
-  if (dpi >= 290) return { cls: 'good', label: 'Excellent' };
-  if (dpi >= 200) return { cls: 'ok', label: 'Good' };
-  return { cls: 'low', label: 'Low' };
-}
-const slotName = (i) => (count() === 1 ? 'Photo' : `Photo ${i + 1}`);
-const slotSide = (i) => (count() === 1 ? 'Whole sheet' : i === 0 ? 'Left half' : 'Right half');
-const layerById = (id) => (id === 'date' ? state.date : state.layers.find((l) => l.id === id));
-const fontsInUse = () => [...new Set([...state.layers.map((l) => l.font), ...(state.date.on ? [state.date.font] : [])])];
 
-/** Any caption edit means the sheet no longer matches a template exactly. */
-function captionsChanged({ rebuildList = false } = {}) {
-  state.templateId = null;
-  saveState();
-  buildTemplateChips();
-  if (rebuildList) buildLayerList();
-  buildDateRow();
-  loadFonts(fontsInUse()).then(drawPreview);
-  drawPreview();
-}
+const fullSource = makeSourceCache();
+const previewCache = makeSourceCache();
+const previewSource = (p, pxPerSrc) => previewCache({ bitmap: p.preview }, pxPerSrc * (p.width / p.preview.width));
 
-/* ---------------- photo loading ---------------- */
+const count = () => (doc.format === 'two' ? 2 : 1);
+const prints = () => doc[doc.format];
+const sheet = () => sheetLayout({ paperId: doc.paperId, customPaper: doc.customPaper, format: doc.format, prints: prints() });
+const photoDate = (i) => photos[i]?.date || today;
+const docData = () => JSON.stringify({ ...doc, templateId: null });
+
+/* Undo history: a snapshot after every finished change. */
+let history = [docData()];
+let future = [];
+function save() { writeJson(STATE_KEY, doc); }
+/** Record a finished change: save it, make it undoable and redraw the sheet. */
+function commit({ keepTemplate = false } = {}) {
+  if (!keepTemplate) doc.templateId = null;
+  const snap = docData();
+  if (snap !== history[history.length - 1]) {
+    history.push(snap);
+    if (history.length > 80) history.shift();
+    future = [];
+  }
+  save();
+  drawHome();
+}
+function restore(snap) {
+  const templateId = doc.templateId;
+  doc = sanitizeDoc(JSON.parse(snap));
+  doc.templateId = templateId;
+  save();
+  drawHome();
+}
+const undo = () => { if (history.length < 2) return false; future.push(history.pop()); restore(history[history.length - 1]); return true; };
+const redo = () => { if (!future.length) return false; const s = future.pop(); history.push(s); restore(s); return true; };
+
+/* ---------------- photos ---------------- */
 async function loadPhoto(file) {
-  // An <img> applies the EXIF orientation (CSS image-orientation: from-image is the default
-  // in every current browser), and drawImage() of it keeps that orientation, so phone
-  // photos come in upright with naturalWidth/Height already swapped when needed.
+  // An <img> applies the EXIF orientation, so phone photos come in upright.
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.decoding = 'async';
@@ -157,13 +117,24 @@ async function loadPhoto(file) {
   pctx.drawImage(small, 0, 0, pv.width, pv.height);
   let date = null;
   try { date = readExifDate(await file.slice(0, 256 * 1024).arrayBuffer()); } catch { /* not a JPEG */ }
-  return {
-    bitmap: img, preview: pv, url, width, height, rot: 0, zoom: 1, cx: 0.5, cy: 0.5,
-    name: file.name, date: date || new Date(file.lastModified || Date.now()),
-  };
+  return { bitmap: img, preview: pv, url, width, height, name: file.name, date: date || new Date(file.lastModified || Date.now()) };
+}
+function releasePhoto(p) { if (p) URL.revokeObjectURL(p.url); }
+/** Put a photo in slot i of both formats (each print keeps its own crop, reset for the new photo). */
+async function setPhoto(i, file) {
+  const p = await loadPhoto(file);
+  releasePhoto(photos[i]);
+  photos[i] = p;
+  for (const f of ['two', 'one']) if (doc[f][i]) doc[f][i].crop = defaultCrop();
+  putBlob('photos', i, file);
+}
+function removePhoto(i) {
+  releasePhoto(photos[i]);
+  photos[i] = null;
+  deleteBlob('photos', i);
 }
 
-async function placeFiles(files, target) {
+async function placeFiles(files, target, then) {
   const images = [...files].filter((f) => f.type.startsWith('image/') || /\.(hei[cf]|jpe?g|png|webp|avif)$/i.test(f.name));
   if (!images.length) return toast('Those files aren’t images.');
   const all = Array.from({ length: count() }, (_, i) => i);
@@ -174,139 +145,125 @@ async function placeFiles(files, target) {
     if (!order.length) order = all;
   }
   if (images.length > order.length) toast(count() === 2 ? 'The sheet holds two photos.' : 'One Wide holds one photo.');
+  const placed = [];
   await Promise.all(images.slice(0, order.length).map(async (file, k) => {
-    try {
-      const p = await loadPhoto(file);
-      releasePhoto(photos[order[k]]);
-      photos[order[k]] = p;
-    } catch (e) { toast(e.message); }
+    try { await setPhoto(order[k], file); placed.push(order[k]); } catch (e) { toast(e.message); }
   }));
-  update();
+  commit();
+  editor.refresh();
+  if (placed.length) then?.(Math.min(...placed));
 }
-function releasePhoto(p) { if (p) URL.revokeObjectURL(p.url); }
 
-/* ---------------- preview ---------------- */
+const fileInput = $('#fileInput');
+let pickThen = null, pickTarget = null;
+function pickFiles(i, then) {
+  pickTarget = i;
+  pickThen = then;
+  fileInput.multiple = count() === 2 && (i == null || (!photos[0] && !photos[1]));
+  fileInput.click();
+}
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) placeFiles(fileInput.files, pickTarget, pickThen);
+  fileInput.value = '';
+});
+
+/* ---------------- picture stickers ---------------- */
+const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(blob); });
+async function decodeAsset(blob) {
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  return { img, dataUrl: await blobToDataUrl(blob), w: img.naturalWidth, h: img.naturalHeight };
+}
+/** Add a picture (PNG, GIF's first frame, …) as a sticker asset, at most 1200 px on its long side. */
+async function addAsset(file) {
+  const src = await decodeAsset(file);
+  const k = Math.min(1, 1200 / Math.max(src.w, src.h));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(src.w * k));
+  cv.height = Math.max(1, Math.round(src.h * k));
+  const c = cv.getContext('2d');
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(src.img, 0, 0, cv.width, cv.height);
+  const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+  const id = newId();
+  assets.set(id, await decodeAsset(blob));
+  putBlob('assets', id, blob);
+  return { id, ratio: cv.width / cv.height };
+}
+/** Theme text carries pictures as data: URLs; store each as an asset and point the element at it. */
+async function ingestAssets(d) {
+  for (const f of ['two', 'one']) for (const p of d[f]) for (const el of p.elements) {
+    if (el.type !== 'image' || !el.src) continue;
+    try {
+      const blob = await (await fetch(el.src)).blob();
+      const id = newId();
+      assets.set(id, await decodeAsset(blob));
+      putBlob('assets', id, blob);
+      el.asset = id;
+    } catch { /* unreadable picture: dropped below */ }
+    delete el.src;
+  }
+  for (const f of ['two', 'one']) for (const p of d[f]) p.elements = p.elements.filter((el) => el.type !== 'image' || assets.has(el.asset));
+  return d;
+}
+/** A copy of a document with its pictures inlined, for theme text. */
+function withPictures(d) {
+  const c = JSON.parse(JSON.stringify(d));
+  for (const f of ['two', 'one']) for (const p of c[f]) {
+    p.elements = p.elements.filter((el) => el.type !== 'image' || assets.get(el.asset)?.dataUrl);
+    for (const el of p.elements) if (el.type === 'image') { el.src = assets.get(el.asset).dataUrl; delete el.asset; }
+  }
+  return c;
+}
+const assetIds = (d) => ['two', 'one'].flatMap((f) => d[f].flatMap((p) => p.elements.filter((e) => e.type === 'image').map((e) => e.asset)));
+
+/* ---------------- home: the sheet ---------------- */
 const sheetEl = $('#sheet');
 const canvas = $('#preview');
 const slotsEl = $('#slots');
 
-function drawPreview() {
-  const layout = currentLayout();
+const items = (only = false) => prints().map((print, i) => ((only && !photos[i]) ? null : { print, photo: photos[i], photoDate: photoDate(i) }));
+function drawHome() {
+  const layout = sheet();
+  sheetEl.style.setProperty('--ar', String(layout.paper.w / layout.paper.h));
   const rect = sheetEl.getBoundingClientRect();
-  if (!rect.width) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
-  const hits = [];
-  renderSheet(canvas.getContext('2d'), layout, renderSlots({ keepEmpty: true }), {
-    scale: canvas.width / layout.paper.w, color: frameColor(), marks: state.marks, sourceFor: previewSource,
-    hits, skip: editingCaption,
-  });
-  syncCaptionEditors(hits, layout, rect.width / layout.paper.w);
-  drawThumbs();
-}
-
-/* ---------------- text captions: edit in place on the preview ---------------- */
-// Each text caption on the sheet gets a transparent input laid exactly over it: tap it and
-// type. While one is focused the canvas leaves that line out and the input shows the text.
-let editingCaption = null;
-const capLayer = $('#capLayer');
-function syncCaptionEditors(hits, layout, pxPerMm) {
-  const live = new Set();
-  for (const h of hits) {
-    if (h.kind !== 'text') continue;
-    const key = `${h.card}:${h.id}`;
-    live.add(key);
-    let inp = capLayer.querySelector(`[data-key="${key}"]`);
-    if (!inp) {
-      inp = document.createElement('input');
-      inp.type = 'text';
-      inp.className = 'cap-edit';
-      inp.maxLength = 60;
-      inp.enterKeyHint = 'done';
-      inp.placeholder = 'Write a caption…';
-      inp.dataset.key = key;
-      inp.setAttribute('aria-label', count() === 2 ? `Caption on photo ${h.card + 1}` : 'Caption');
-      inp.addEventListener('focus', () => {
-        editingCaption = { id: inp.dataset.id, card: Number(inp.dataset.card) };
-        setTab('captions'); // typing on the print brings up the caption controls
-        drawPreview();
-      });
-      inp.addEventListener('blur', () => { editingCaption = null; drawPreview(); });
-      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
-      inp.addEventListener('input', () => {
-        const l = layerById(inp.dataset.id);
-        if (!l) return;
-        if (l.same) l.text = inp.value; else l.texts[Number(inp.dataset.card)] = inp.value;
-        captionsChanged({ rebuildList: true });
-      });
-      capLayer.append(inp);
-    }
-    inp.dataset.id = h.id;
-    inp.dataset.card = h.card;
-    const l = layerById(h.id);
-    const value = l ? (l.same ? l.text : l.texts[h.card]) || '' : '';
-    if (document.activeElement !== inp) inp.value = value;
-    // 16 px text (so iOS doesn't zoom on focus), scaled down to the caption's real size.
-    const k = (h.size * pxPerMm) / 16;
-    Object.assign(inp.style, {
-      left: `${(h.cx / layout.paper.w) * 100}%`, top: `${(h.cy / layout.paper.h) * 100}%`,
-      width: `${(h.len * pxPerMm) / k}px`, height: `${(h.lh * pxPerMm) / k}px`,
-      transform: `translate(-50%, -50%) rotate(${h.rot}deg) scale(${k})`,
-      fontFamily: h.font, textAlign: h.align === 'start' ? 'left' : h.align === 'end' ? 'right' : 'center',
+  if (rect.width) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    renderSheet(canvas.getContext('2d'), layout, items(), {
+      scale: canvas.width / layout.paper.w, marks: doc.marks, sourceFor: previewSource, assets,
     });
-    inp.style.setProperty('--cap-ink', h.color);
   }
-  for (const inp of [...capLayer.children]) if (!live.has(inp.dataset.key) && document.activeElement !== inp) inp.remove();
+  buildSlots(layout);
+  buildHomeTools();
+  $$('#formatSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === doc.format)));
+  $('#homeHint').textContent = photos.slice(0, count()).some(Boolean) ? 'Tap a print to edit it' : count() === 2 ? 'Add two photos, then tap a print to edit it' : 'Add a photo, then tap it to edit';
 }
-
-const ICONS = {
-  rotl: '<path d="M4 8a6.5 6.5 0 1 1 1.6 6.4"/><path d="M4 3.5V8h4.5"/>',
-  rotr: '<path d="M16 8a6.5 6.5 0 1 0-1.6 6.4"/><path d="M16 3.5V8h-4.5"/>',
-  flip: '<path d="M10 3v14M6 13l4 4 4-4M6 7l4-4 4 4"/>',
-  adjust: '<path d="M5 2.5v12.5h12.5"/><path d="M2.5 5H15v12.5"/>',
-  replace: '<path d="M3 13.5 7 9.5l3 3 3.5-4 3.5 4"/><rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/>',
-  remove: '<path d="M5 6h10M8 6V4.5h4V6M6.5 6l.7 9.5h5.6l.7-9.5"/>',
-  plus: '<path d="M10 4v12M4 10h12"/>',
-  date: '<rect x="3" y="4.5" width="14" height="12" rx="2"/><path d="M3 8.5h14M7 3v3M13 3v3"/>',
-  text: '<path d="M4 5h12M10 5v11"/>',
-  more: '<circle cx="5" cy="10" r=".9"/><circle cx="10" cy="10" r=".9"/><circle cx="15" cy="10" r=".9"/>',
-  check: '<path d="m4.5 10.5 3.5 3.5 7.5-8"/>',
-};
-const icon = (k) => `<svg viewBox="0 0 20 20" aria-hidden="true">${ICONS[k]}</svg>`;
-
-function buildSlots() {
-  const layout = currentLayout();
+function buildSlots(layout) {
   const { paper } = layout;
-  slotsEl.replaceChildren(...layout.cards.map((card, i) => {
+  const key = JSON.stringify([layout.slots.map((s) => [s.x, s.w, s.h]), photos.map(Boolean), paper.w, paper.h]);
+  if (slotsEl.dataset.key === key) return;
+  slotsEl.dataset.key = key;
+  slotsEl.replaceChildren(...layout.slots.map((slot, i) => {
     const el = document.createElement('div');
     el.className = 'slot';
-    Object.assign(el.style, pct(card.win, paper));
-    const p = photos[i];
-    if (!p) {
-      el.classList.add('empty');
-      el.tabIndex = 0;
-      el.setAttribute('role', 'button');
-      el.setAttribute('aria-label', `Add ${slotName(i).toLowerCase()}`);
-      el.innerHTML = `<span class="slot-plus">${icon('plus')}</span>`;
-      el.addEventListener('click', () => pickFiles(i));
-      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFiles(i); } });
+    Object.assign(el.style, {
+      left: `${(slot.x / paper.w) * 100}%`, top: `${(slot.y / paper.h) * 100}%`,
+      width: `${(slot.w / paper.w) * 100}%`, height: `${(slot.h / paper.h) * 100}%`,
+    });
+    const name = count() === 2 ? `print ${i + 1}` : 'the print';
+    if (photos[i]) {
+      el.innerHTML = `<button class="slot-hit" aria-label="Edit ${name}"></button><span class="slot-pill">${icon('edit')}Edit</span>`;
+      el.querySelector('.slot-hit').addEventListener('click', () => editor.open(i));
     } else {
-      el.classList.add('filled');
-      el.classList.toggle('selected', selected === i);
-      el.innerHTML = `<div class="slot-tools" role="toolbar" aria-label="${slotName(i)}">
-          ${toolBtn('rotl', 'Turn left')}${toolBtn('rotr', 'Turn right')}${toolBtn('flip', 'Flip 180°')}${toolBtn('adjust', 'Crop & zoom')}
-        </div>`;
-      el.querySelector('.slot-tools').addEventListener('click', (e) => {
-        const b = e.target.closest('button');
-        if (!b) return;
-        e.stopPropagation();
-        onTool(b.dataset.act, i);
-      });
-      // Mouse/pen: drag to pan right in the preview. Touch: the preview stays scrollable.
-      // A tap or click (no drag) opens the photo editor, same as the Crop button.
-      attachPan(el, () => p, () => el.clientWidth, () => currentLayout().cards[i].win, drawPreview, buildPhotoList,
-        () => { select(i); openAdjust(i); }, { touch: false });
+      el.classList.add('empty');
+      el.innerHTML = `<button class="slot-add" aria-label="Add a photo to ${name}"><span class="slot-plus">${icon('plus')}</span><span>Add photo</span></button>
+        <button class="slot-edit">Edit frame</button>`;
+      el.querySelector('.slot-add').addEventListener('click', () => pickFiles(i, (k) => editor.open(k)));
+      el.querySelector('.slot-edit').addEventListener('click', () => editor.open(i));
     }
     el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drop-target'); });
     el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
@@ -319,254 +276,105 @@ function buildSlots() {
     return el;
   }));
 }
-const toolBtn = (act, label) => `<button type="button" data-act="${act}" title="${label}" aria-label="${label}">${icon(act)}</button>`;
-const pct = (r, paper) => ({
-  left: `${(r.x / paper.w) * 100}%`, top: `${(r.y / paper.h) * 100}%`,
-  width: `${(r.w / paper.w) * 100}%`, height: `${(r.h / paper.h) * 100}%`,
-});
 
-/** Mark a photo as the current one (preview outline + its row in the Photos tab). */
-function select(i) {
-  selected = i;
-  setTab('frame'); // the photo's controls live in the Photos tab
-  $$('.slot.filled').forEach((s) => s.classList.remove('selected'));
-  slotsEl.children[i]?.classList.add('selected');
-  $$('.photo-row').forEach((r) => r.classList.toggle('selected', Number(r.dataset.i) === i));
-}
+export const ICONS = {
+  plus: '<path d="M10 4v12M4 10h12"/>',
+  edit: '<path d="M4 16h3.5L16 7.5 12.5 4 4 12.5z"/><path d="m11 5.5 3.5 3.5"/>',
+  paper: '<rect x="3" y="5" width="14" height="10" rx="1"/><path d="M10 5v10"/>',
+  cut: '<circle cx="5.5" cy="14" r="2.2"/><circle cx="14.5" cy="14" r="2.2"/><path d="M7.3 12.6 15 4M12.7 12.6 5 4"/>',
+  swap: '<path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/>',
+  theme: '<path d="M10 3a7 7 0 1 0 0 14c1 0 1.6-.7 1.6-1.5 0-.5-.3-.8-.3-1.3 0-.8.6-1.4 1.4-1.4H14a3 3 0 0 0 3-3C17 6 14 3 10 3Z"/><circle cx="6.5" cy="9" r=".9"/><circle cx="9" cy="6.2" r=".9"/><circle cx="12.6" cy="6.6" r=".9"/>',
+  check: '<path d="m4.5 10.5 3.5 3.5 7.5-8"/>',
+};
+export const icon = (k) => `<svg viewBox="0 0 20 20" aria-hidden="true">${ICONS[k]}</svg>`;
 
-/* ---------------- photos ---------------- */
-const listEl = $('#photoList');
-
-function buildPhotoList() {
-  const layout = currentLayout();
-  const rows = [];
-  const n = count();
-  if (!photos.slice(0, n).some(Boolean)) {
-    rows.push(addRow(n === 2 ? 'Add photos' : 'Add photo', n === 2 ? 'Choose one or two' : 'Fills the whole sheet', null));
-  } else {
-    for (let i = 0; i < n; i++) {
-      const p = photos[i];
-      if (!p) { rows.push(addRow(`Add ${slotName(i).toLowerCase()}`, `${slotSide(i)} · or leave it blank`, i)); continue; }
-      const { dpi } = photoDpi(p, layout.cards[i].win);
-      const q = quality(dpi);
-      const row = document.createElement('div');
-      row.className = 'photo-row';
-      row.dataset.i = i;
-      row.classList.toggle('selected', selected === i);
-      row.innerHTML = `
-        <div class="photo-main">
-          <button class="photo-thumb" data-act="replace" aria-label="Replace ${slotName(i).toLowerCase()}"><canvas width="88" height="112"></canvas></button>
-          <div class="photo-text">
-            <b>${slotName(i)}</b>
-            <small>${slotSide(i)} · <span class="q ${q.cls}">${q.label}</span> · ${Math.round(dpi)} dpi</small>
-          </div>
-        </div>
-        <div class="photo-actions">
-          ${pa('rotl', 'Turn left')}${pa('rotr', 'Turn right')}${pa('flip', 'Flip')}${pa('adjust', 'Crop')}${pa('remove', 'Remove', 'danger')}
-        </div>`;
-      row.addEventListener('click', (e) => {
-        const b = e.target.closest('button');
-        if (b) onTool(b.dataset.act, i);
-      });
-      rows.push(row);
-    }
-  }
-  listEl.replaceChildren(...rows);
-  $('#swapBtn').hidden = !(n === 2 && (photos[0] || photos[1]));
-  drawThumbs();
-}
-const pa = (act, label, cls = '') => `<button class="pa ${cls}" data-act="${act}" aria-label="${label}">${icon(act)}<span>${label}</span></button>`;
-function addRow(title, sub, i) {
+const fmtMm = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+const paperName = (p) => (p.id === 'custom' ? `Custom ${fmtMm(p.w)} × ${fmtMm(p.h)} mm` : PAPERS[p.id] ? p.id : p.kind);
+function deckButton(key, label, onClick, { pressed, sub } = {}) {
   const b = document.createElement('button');
-  b.className = 'add-row';
-  b.innerHTML = `<span class="plus">${icon('plus')}</span><span>${title}${sub ? `<small>${sub}</small>` : ''}</span>`;
-  b.addEventListener('click', () => pickFiles(i));
+  b.className = 'deck-btn';
+  b.innerHTML = `${icon(key)}<span>${label}</span>${sub ? `<small>${sub}</small>` : ''}`;
+  if (pressed != null) b.setAttribute('aria-pressed', String(pressed));
+  b.addEventListener('click', onClick);
   return b;
 }
-
-function drawThumbs() {
-  const layout = currentLayout();
-  const slots = renderSlots();
-  $$('.photo-row').forEach((row) => {
-    const i = Number(row.dataset.i);
-    const cv = row.querySelector('canvas');
-    const card = layout.cards[i];
-    if (!cv || !card) return;
-    const ctx = cv.getContext('2d');
-    const k = Math.min(cv.width / card.w, cv.height / card.h);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#F1F0EE';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-    renderSheet(ctx, { ...layout, cards: [card] }, [slots[i]], {
-      scale: k, origin: { x: card.x - (cv.width / k - card.w) / 2, y: card.y - (cv.height / k - card.h) / 2 },
-      color: frameColor(), marks: false, sourceFor: previewSource, keepBackground: true,
-    });
-  });
+function buildHomeTools() {
+  const paper = resolvePaper(doc.paperId, doc.customPaper);
+  const tools = [deckButton('paper', 'Paper', () => { buildPaperList(); $('#paperDlg').showModal(); }, { sub: paper.id === 'custom' ? 'Custom' : PAPERS[paper.id] ? paper.id : paper.kind })];
+  if (count() === 2) {
+    tools.push(deckButton('cut', 'Cut guide', () => { doc.marks = !doc.marks; commit(); }, { pressed: doc.marks }));
+    tools.push(deckButton('swap', 'Swap', swapPrints));
+  }
+  tools.push(deckButton('theme', 'Themes', () => { buildTemplateManager(); $('#themesDlg').showModal(); }));
+  $('#homeTools').replaceChildren(...tools);
 }
-
-function rotate(p, deg) {
-  p.rot = (p.rot + deg + 360) % 360;
-  p.cx = 0.5; p.cy = 0.5;
+function swapPrints() {
+  [photos[0], photos[1]] = [photos[1], photos[0]];
+  [doc.two[0], doc.two[1]] = [doc.two[1], doc.two[0]];
+  for (const i of [0, 1]) {
+    // Keep the saved photos in their new slots.
+    if (photos[i]) fetch(photos[i].url).then((r) => r.blob()).then((b) => putBlob('photos', i, b)).catch(() => {});
+    else deleteBlob('photos', i);
+  }
+  commit();
 }
-function onTool(act, i) {
-  if (act === 'replace') return pickFiles(i);
-  const p = photos[i];
-  if (!p) return;
-  if (act === 'rotl') rotate(p, -90);
-  else if (act === 'rotr') rotate(p, 90);
-  else if (act === 'flip') rotate(p, 180);
-  else if (act === 'adjust') return openAdjust(i);
-  else if (act === 'remove') { releasePhoto(p); photos[i] = null; if (selected === i) selected = null; }
-  update();
-}
-$('#swapBtn').addEventListener('click', () => { [photos[0], photos[1]] = [photos[1], photos[0]]; update(); });
-
-/**
- * Drag to pan, wheel / pinch to zoom, in any element showing a photo window.
- * A press that barely moves counts as a tap.
- */
-function attachPan(el, getPhoto, winCssW, getWin, onMove, onEnd, onTap, { touch = true } = {}) {
-  const pts = new Map();
-  let start = null, moved = false;
-  const snapshot = () => {
-    const p = getPhoto(), win = getWin();
-    return { p, crop: cropRect(p.width, p.height, p.rot, win.w / win.h, p.zoom, p.cx, p.cy), zoom: p.zoom };
-  };
-  const setCenter = (p, crop, x, y) => {
-    p.cx = clamp(x / crop.W, crop.w / 2 / crop.W, 1 - crop.w / 2 / crop.W);
-    p.cy = clamp(y / crop.H, crop.h / 2 / crop.H, 1 - crop.h / 2 / crop.H);
-  };
-  const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
-  const begin = () => ({ ...snapshot(), pts: new Map([...pts].map(([k, v]) => [k, { ...v }])), d: pts.size === 2 ? dist() : 0 });
-  el.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('button')) return;
-    if (e.pointerType === 'touch' && !touch) {
-      // Let the page scroll; treat a short, still touch as a tap.
-      const x0 = e.clientX, y0 = e.clientY;
-      el.addEventListener('pointerup', (u) => { if (Math.hypot(u.clientX - x0, u.clientY - y0) < 8) onTap?.(); }, { once: true });
-      return;
-    }
-    el.setPointerCapture(e.pointerId);
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 1) moved = false;
-    start = begin();
-  });
-  el.addEventListener('pointermove', (e) => {
-    if (!pts.has(e.pointerId) || !start) return;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const { p, crop } = start;
-    if (pts.size === 2 && start.d) {
-      moved = true;
-      p.zoom = clamp(start.zoom * (dist() / start.d), 1, 5);
-    } else {
-      const s0 = start.pts.get(e.pointerId);
-      if (!s0) return;
-      const dx = e.clientX - s0.x, dy = e.clientY - s0.y;
-      if (!moved && Math.hypot(dx, dy) < 6) return;
-      moved = true;
-      const k = crop.w / winCssW();
-      setCenter(p, crop, crop.x + crop.w / 2 - dx * k, crop.y + crop.h / 2 - dy * k);
-    }
-    onMove();
-  });
-  const end = (e) => {
-    if (!pts.delete(e.pointerId)) return;
-    start = pts.size ? begin() : null;
-    if (!pts.size) { if (moved) onEnd(); else if (e.type === 'pointerup') onTap?.(); }
-  };
-  el.addEventListener('pointerup', end);
-  el.addEventListener('pointercancel', end);
-  el.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const p = getPhoto();
-    p.zoom = clamp(p.zoom * Math.exp(-e.deltaY * 0.0015), 1, 5);
-    onMove();
-    clearTimeout(el._wheelT);
-    el._wheelT = setTimeout(onEnd, 250);
-  }, { passive: false });
-}
-
-/* ---------------- adjust dialog ---------------- */
-const adjustDlg = $('#adjust');
-const adjCanvas = $('#adjustCanvas');
-let adjIndex = 0;
-let adjBackup = null;
-
-const adjPhoto = () => photos[adjIndex];
-function openAdjust(i) {
-  adjIndex = i;
-  const p = adjPhoto();
-  if (!p) return;
-  adjBackup = { rot: p.rot, zoom: p.zoom, cx: p.cx, cy: p.cy };
-  $('#adjustTitle').textContent = slotName(i);
-  adjustDlg.returnValue = '';
-  adjustDlg.showModal();
-  requestAnimationFrame(drawAdjust);
-}
-function drawAdjust() {
-  const p = adjPhoto();
-  if (!p) return;
-  const layout = currentLayout();
-  const card = layout.cards[adjIndex];
-  const box = $('#adjustStage').getBoundingClientRect();
-  const maxW = Math.max(160, box.width - 32);
-  const maxH = Math.max(200, (box.height || window.innerHeight * 0.6) - 32);
-  const cssScale = Math.min(maxW / card.w, Math.min(maxH, 640) / card.h);
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  adjCanvas.style.width = `${card.w * cssScale}px`;
-  adjCanvas.style.height = `${card.h * cssScale}px`;
-  adjCanvas.width = Math.round(card.w * cssScale * dpr);
-  adjCanvas.height = Math.round(card.h * cssScale * dpr);
-  renderSheet(adjCanvas.getContext('2d'), { ...layout, cards: [card] }, [renderSlots()[adjIndex]], {
-    scale: cssScale * dpr, origin: { x: card.x, y: card.y }, color: frameColor(), marks: false, sourceFor: previewSource,
-  });
-  $('#zoomRange').value = p.zoom;
-  const { dpi, crop } = photoDpi(p, card.win);
-  const q = quality(dpi);
-  $('#adjustStats').innerHTML = `<span class="q ${q.cls}">${q.label}</span> · ${Math.round(dpi)} dpi · using ${Math.round(crop.w)} × ${Math.round(crop.h)} of ${p.width} × ${p.height} px`;
-}
-attachPan(adjCanvas, adjPhoto, () => {
-  const card = currentLayout().cards[adjIndex];
-  return adjCanvas.clientWidth * (card.win.w / card.w);
-}, () => currentLayout().cards[adjIndex].win, drawAdjust, () => {});
-$('#zoomRange').addEventListener('input', (e) => { adjPhoto().zoom = Number(e.target.value); drawAdjust(); });
-$$('[data-rot]', adjustDlg).forEach((b) => b.addEventListener('click', () => { rotate(adjPhoto(), Number(b.dataset.rot)); drawAdjust(); }));
-$('#adjustReset').addEventListener('click', () => { Object.assign(adjPhoto(), { rot: 0, zoom: 1, cx: 0.5, cy: 0.5 }); drawAdjust(); });
-adjustDlg.addEventListener('close', () => {
-  if (adjustDlg.returnValue !== 'done' && adjBackup && adjPhoto()) Object.assign(adjPhoto(), adjBackup);
-  adjBackup = null;
-  update();
+$('#formatSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.value === doc.format) return;
+  doc.format = b.dataset.value;
+  commit({ keepTemplate: true });
+  loadFonts(fontsInUse()).then(drawHome);
 });
 
-/* ---------------- frame ---------------- */
-function buildSwatches() {
-  $('#swatches').replaceChildren(...FRAME_COLORS.map((c) => {
-    const b = document.createElement('button');
-    b.className = 'swatch';
-    b.style.background = c.fill;
-    b.title = c.label;
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-label', c.label);
-    b.setAttribute('aria-checked', String(state.color === c.id));
-    b.addEventListener('click', () => { state.color = c.id; update(); });
-    return b;
-  }));
-}
-$('#marksToggle').addEventListener('change', (e) => { state.marks = e.target.checked; saveState(); drawPreview(); });
+const fontsInUse = () => [...new Set(['two', 'one'].flatMap((f) => doc[f].flatMap((p) => p.elements.filter((e) => e.font).map((e) => e.font))))];
 
-/* ---------------- captions: templates ---------------- */
+/* ---------------- paper ---------------- */
+function paperRow(p) {
+  const b = document.createElement('button');
+  b.className = 'paper-row';
+  b.setAttribute('role', 'radio');
+  b.setAttribute('aria-checked', String(doc.paperId === p.id));
+  const title = PAPERS[p.id] ? p.id : p.kind;
+  const sub = PAPERS[p.id] ? `${p.kind} · ${p.note}` : p.note;
+  b.innerHTML = `<span><b>${title}</b><small>${sub}</small></span><span class="dims">${fmtMm(p.w)} × ${fmtMm(p.h)}</span><span class="check">${icon('check')}</span>`;
+  // Picking a paper loads its size into the fields, so it can be tweaked into a custom size.
+  b.addEventListener('click', () => { doc.paperId = p.id; doc.customPaper = { w: p.w, h: p.h }; commit(); buildPaperList(); });
+  return b;
+}
+function buildPaperList() {
+  const paper = resolvePaper(doc.paperId, doc.customPaper);
+  $('#paperList').replaceChildren(...Object.values(PAPERS).map(paperRow));
+  $('#otherPaperList').replaceChildren(...Object.values(OTHER_PAPERS).map(paperRow));
+  for (const [id, v] of [['#paperW', paper.w], ['#paperH', paper.h]]) if (document.activeElement !== $(id)) $(id).value = fmtMm(v);
+  $('#paperSizeNote').textContent = doc.paperId === 'custom'
+    ? `Custom size, ${CUSTOM_PAPER.min}–${CUSTOM_PAPER.max} mm per side.`
+    : `${paperName(paper)}. Pick another below, or type any size for a custom sheet.`;
+}
+for (const id of ['#paperW', '#paperH']) {
+  $(id).addEventListener('change', () => {
+    const w = parseFloat($('#paperW').value), h = parseFloat($('#paperH').value);
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+    const match = [...Object.values(PAPERS), ...Object.values(OTHER_PAPERS)]
+      .find((p) => Math.abs(p.w - Math.max(w, h)) < 0.05 && Math.abs(p.h - Math.min(w, h)) < 0.05);
+    doc.customPaper = { w, h };
+    doc.paperId = doc.paperId !== 'custom' && match && resolvePaper(doc.paperId).w === match.w && resolvePaper(doc.paperId).h === match.h
+      ? doc.paperId : match ? match.id : 'custom';
+    commit();
+    buildPaperList();
+  });
+}
+$('#paperSize').addEventListener('submit', (e) => { e.preventDefault(); document.activeElement?.blur(); });
+
+/* ---------------- themes ---------------- */
 function allTemplates() {
-  return [
-    ...siteTemplates.map((t, k) => ({ id: `s${k}`, name: t.name, look: t.look, layers: () => t.layers, date: () => t.date })),
-    ...templates.map((t) => ({ ...t, layers: () => t.layers, date: () => t.date })),
-  ];
+  return [...siteTemplates.map((t, k) => ({ ...t, id: `s${k}`, site: true })), ...templates];
 }
 /** Templates shipped with the site: app/templates.json, in the same text format as Export. */
 fetch('templates.json', { cache: 'no-cache' })
   .then((r) => (r.ok ? r.text() : null))
   .then((text) => {
     if (!text) return;
-    try { siteTemplates = parseTemplatesText(text); } catch { siteTemplates = []; }
+    try { siteTemplates = parseThemesText(text); } catch { siteTemplates = []; }
     buildTemplateChips();
   })
   .catch(() => {});
@@ -587,83 +395,94 @@ async function copyText(text, what) {
     toast(ok ? `${what} copied as text` : 'Copy failed — use Save file instead');
   }
 }
-/** Apply a template: its captions and date, and its whole look when it has one. */
-function applyTemplate(t) {
-  state.layers = cloneLayers(t.layers());
-  state.date = cloneDate(t.date());
-  state.templateId = t.id;
-  if (t.look) {
-    const s = readLook(defaults(), t.look);
-    Object.assign(state, {
-      format: t.look.format === 'one' ? 'one' : 'two',
-      layout: s.layout, color: s.color, marks: s.marks, paperId: s.paperId, customPaper: s.customPaper,
+const freshIds = (els) => els.map((e) => ({ ...JSON.parse(JSON.stringify(e)), id: newId() }));
+/** Apply a theme: its whole look (keeping each print's photo crop), or only its writing for old caption templates. */
+async function applyTemplate(t) {
+  const d = await ingestAssets(JSON.parse(JSON.stringify(t.doc)));
+  for (const f of ['two', 'one']) {
+    d[f].forEach((p, i) => {
+      if (t.elementsOnly) {
+        // Writing only: keep this print's look and move the writing onto its layout.
+        const moved = { elements: freshIds(p.elements) };
+        if (doc[f][i].orientation === p.orientation) remapElements(moved, cardOf(d, f, i), cardOf(doc, f, i));
+        doc[f][i].elements = moved.elements;
+      }
+      else doc[f][i] = { ...clonePrint(p), crop: doc[f][i].crop, elements: freshIds(p.elements) };
     });
   }
-  update();
+  if (!t.elementsOnly) Object.assign(doc, { format: d.format, paperId: d.paperId, customPaper: d.customPaper, marks: d.marks, linked: d.linked });
+  doc.templateId = t.id;
+  commit({ keepTemplate: true });
+  buildTemplateChips();
+  editor.refresh();
+  loadFonts(fontsInUse()).then(() => { drawHome(); editor.refresh(); });
 }
 const newTemplateId = () => `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-/** Save parsed templates under their own names (replacing same-named ones); returns the saved list. */
-function storeTemplates(parsed) {
-  return parsed.map((t) => {
+const saveTemplates = () => writeJson(TEMPLATES_KEY, templates.map((t) => ({ id: t.id, name: t.name, doc: t.doc, elementsOnly: t.elementsOnly })));
+/** Save parsed themes under their own names (replacing same-named ones); returns the saved list. */
+async function storeTemplates(parsed) {
+  const out = [];
+  for (const t of parsed) {
     const existing = templates.find((x) => x.name.toLowerCase() === t.name.toLowerCase());
-    const tpl = { id: existing?.id || newTemplateId(), name: t.name, layers: t.layers, date: t.date, look: t.look };
+    const tpl = { id: existing?.id || newTemplateId(), name: t.name, doc: await ingestAssets(t.doc), elementsOnly: t.elementsOnly };
     templates = existing ? templates.map((x) => (x.id === tpl.id ? tpl : x)) : [...templates, tpl];
-    return tpl;
-  });
+    out.push(tpl);
+  }
+  return out;
 }
-/** Import pasted template text: save every theme by name and apply the first one. */
-function importTemplates(text) {
+/** Import pasted theme text: save every theme by name and apply the first one. */
+async function importTemplates(text) {
   let parsed;
-  try { parsed = parseTemplatesText(text); } catch (err) { toast(err.message); return false; }
-  const saved = storeTemplates(parsed);
+  try { parsed = parseThemesText(text); } catch (err) { toast(err.message); return false; }
+  const saved = await storeTemplates(parsed);
   saveTemplates();
-  applyTemplate({ ...saved[0], layers: () => saved[0].layers, date: () => saved[0].date });
+  await applyTemplate(saved[0]);
   buildTemplateManager();
-  toast(parsed.length === 1 ? `Imported “${parsed[0].name}”` : `Imported ${parsed.length} templates`);
+  toast(parsed.length === 1 ? `Imported “${parsed[0].name}”` : `Imported ${parsed.length} themes`);
   return true;
 }
-const currentThemeName = () => allTemplates().find((t) => t.id === state.templateId)?.name || 'My theme';
-const currentTheme = (name) => ({ name, layers: state.layers, date: state.date, look: currentLook() });
+const currentThemeName = () => allTemplates().find((t) => t.id === doc.templateId)?.name || 'My theme';
+const themeText = (name) => exportThemesText([{ name, doc: withPictures(doc) }]);
 function buildTemplateChips() {
   $('#templateChips').replaceChildren(...allTemplates().map((t) => {
     const b = document.createElement('button');
     b.className = 'chip';
     b.setAttribute('role', 'listitem');
-    b.setAttribute('aria-pressed', String(state.templateId === t.id));
+    b.setAttribute('aria-pressed', String(doc.templateId === t.id));
     b.textContent = t.name;
     b.addEventListener('click', () => applyTemplate(t));
     return b;
   }));
 }
 function buildTemplateManager() {
+  buildTemplateChips();
   const list = $('#tplList');
-  if (!templates.length) { list.innerHTML = '<p class="empty-note">No saved templates yet.</p>'; return; }
+  if (!templates.length) { list.innerHTML = '<p class="empty-note">No saved themes yet.</p>'; return; }
   list.replaceChildren(...templates.map((t) => {
     const row = document.createElement('div');
     row.className = 'tpl-row';
-    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.look ? 'Full theme · ' : 'Captions only · '}${t.layers.length} caption${t.layers.length === 1 ? '' : 's'} · date ${t.date?.on ? 'on' : 'off'}</small></span>
+    row.innerHTML = `<span>${escapeHtml(t.name)}<small>${t.elementsOnly ? 'Writing only' : 'Full theme'}</small></span>
       <button class="apply">Use</button><button class="exp" aria-label="Copy ${escapeHtml(t.name)} as text">Copy</button><button class="del" aria-label="Delete ${escapeHtml(t.name)}">Delete</button>`;
-    row.querySelector('.exp').addEventListener('click', () => copyText(exportTemplatesText([t]), `“${t.name}”`));
-    row.querySelector('.apply').addEventListener('click', () => { applyTemplate({ ...t, layers: () => t.layers, date: () => t.date }); $('#templatesDlg').close(); });
+    row.querySelector('.exp').addEventListener('click', () => copyText(exportThemesText([{ name: t.name, doc: withPictures(t.doc) }]), `“${t.name}”`));
+    row.querySelector('.apply').addEventListener('click', () => { applyTemplate(t); $('#themesDlg').close(); });
     row.querySelector('.del').addEventListener('click', () => {
       templates = templates.filter((x) => x.id !== t.id);
-      if (state.templateId === t.id) state.templateId = null;
-      saveTemplates(); saveState();
-      buildTemplateManager(); buildTemplateChips();
+      if (doc.templateId === t.id) doc.templateId = null;
+      saveTemplates(); save();
+      buildTemplateManager();
     });
     return row;
   }));
 }
-$('[data-open="templatesDlg"]').addEventListener('click', buildTemplateManager);
-$('#copyCurrent').addEventListener('click', () => copyText(exportTemplatesText([currentTheme(currentThemeName())]), 'Current theme'));
+$('#copyCurrent').addEventListener('click', () => copyText(themeText(currentThemeName()), 'Current theme'));
 $('#copyAll').addEventListener('click', () => {
-  if (!templates.length) return toast('No saved templates yet');
-  copyText(exportTemplatesText(templates), 'Templates');
+  if (!templates.length) return toast('No saved themes yet');
+  copyText(exportThemesText(templates.map((t) => ({ name: t.name, doc: withPictures(t.doc) }))), 'Themes');
 });
 for (const [form, box] of [['#importForm', '#importText'], ['#helpImport', '#helpImportText']]) {
-  $(form).addEventListener('submit', (e) => {
+  $(form).addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!importTemplates($(box).value)) return;
+    if (!(await importTemplates($(box).value))) return;
     $(box).value = '';
     if (form === '#helpImport') $('#help').close();
   });
@@ -673,494 +492,83 @@ $('#tplForm').addEventListener('submit', (e) => {
   const name = $('#tplName').value.trim();
   if (!name) return;
   const existing = templates.find((t) => t.name.toLowerCase() === name.toLowerCase());
-  const tpl = { id: existing?.id || newTemplateId(), name, layers: cloneLayers(state.layers), date: cloneDate(state.date), look: currentLook() };
+  const tpl = { id: existing?.id || newTemplateId(), name, doc: sanitizeDoc(JSON.parse(JSON.stringify(doc))), elementsOnly: false };
   templates = existing ? templates.map((t) => (t.id === tpl.id ? tpl : t)) : [...templates, tpl];
-  state.templateId = tpl.id;
-  saveTemplates(); saveState();
+  doc.templateId = tpl.id;
+  saveTemplates(); save();
   $('#tplName').value = '';
-  buildTemplateManager(); buildTemplateChips();
+  buildTemplateManager();
   toast(existing ? `Updated “${name}”` : `Saved “${name}”`);
 });
-
-/* ---------------- captions: the date and text captions on the main screen ---------------- */
-const firstPhotoDate = () => photos.find(Boolean)?.date || today;
-const stampFor = (l) => (l.source === 'now' ? new Date() : firstPhotoDate());
-function describe(l) {
-  const where = { bottom: 'Bottom', top: 'Top', left: 'Left side', right: 'Right side' }[l.edge];
-  const align = { start: 'start', center: 'centre', end: 'end' }[l.align];
-  return `${where} · ${align}`;
-}
-function buildDateRow() {
-  const d = state.date;
-  $('#dateToggle').checked = d.on;
-  $('#dateSummary').textContent = d.on
-    ? `${formatDate(stampFor(d), d.fmt)}${d.source === 'now' ? ' · now' : ''} · ${describe(d)}`
-    : 'Off';
-}
-$('#dateToggle').addEventListener('change', (e) => { state.date.on = e.target.checked; captionsChanged(); });
-$('#dateEdit').addEventListener('click', () => openLayer('date'));
-
-function buildLayerList() {
-  const list = $('#layerList');
-  if (!state.layers.length) { list.replaceChildren(); return; }
-  list.replaceChildren(...state.layers.map((l) => {
-    const row = document.createElement('div');
-    row.className = 'layer-row';
-    row.innerHTML = `
-      <span class="layer-icon">${icon('text')}</span>
-      <div class="layer-main">${textProxies(l)}</div>
-      <button class="font-chip" style="font-family:${escapeHtml(fontCss(l.font))}" aria-label="Font: ${escapeHtml(l.font)}">${escapeHtml(l.font)}</button>
-      <button class="edit-btn" aria-label="Caption options">${icon('more')}</button>`;
-    bindProxies(row, l);
-    row.querySelector('.font-chip').addEventListener('click', () => openFontPicker(l.id));
-    row.querySelector('.edit-btn').addEventListener('click', () => openLayer(l.id));
-    return row;
-  }));
-}
-$('#addText').addEventListener('click', () => {
-  const l = textLayer();
-  state.layers.push(l);
-  captionsChanged({ rebuildList: true });
-  editInPlace(l.id, 0);
+$('#helpImportFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  if (await importTemplates(await file.text())) $('#help').close();
 });
 
-/**
- * Caption text is typed on the print itself. Elsewhere (the list, the caption sheet) the text is
- * shown read-only; tapping it jumps to the matching in-place editor on the preview.
- */
-function textProxies(l) {
-  const fields = l.same || count() === 1
-    ? [[0, count() === 1 || l.same ? 'Caption' : 'Photo 1 caption', l.same ? l.text : l.texts[0]]]
-    : [[0, 'Photo 1 caption', l.texts[0]], [1, 'Photo 2 caption', l.texts[1]]];
-  return fields.map(([card, label, v]) =>
-    `<button type="button" class="text-proxy${v ? '' : ' empty'}" data-card="${card}" aria-label="Edit ${label} on the print">${escapeHtml(v || label)}</button>`).join('');
+/* ---------------- date format sheet (opened from a selected date) ---------------- */
+let dateTarget = null;
+function openDateFormat(el, onChange) {
+  dateTarget = { el, onChange };
+  fillDateDialog();
+  $('#dateDlg').showModal();
 }
-function bindProxies(root, l) {
-  $$('.text-proxy', root).forEach((b) => b.addEventListener('click', () => editInPlace(l.id, Number(b.dataset.card))));
-}
-function editInPlace(id, card) {
-  for (const d of $$('dialog[open]')) d.close();
-  requestAnimationFrame(() => {
-    drawPreview();
-    const inp = capLayer.querySelector(`[data-key="${card}:${id}"]`);
-    if (!inp) return;
-    $('.stage').scrollIntoView?.({ block: 'nearest' });
-    inp.focus({ preventScroll: true });
-    inp.setSelectionRange(inp.value.length, inp.value.length);
+function fillDateDialog() {
+  const { el } = dateTarget || {};
+  if (!el) return;
+  const f = el.fmt;
+  $('#datePreview').textContent = formatDate(el.source === 'now' ? new Date() : photoDate(editor.index()), f);
+  $$('#dateBlock [data-opt]').forEach((seg) => {
+    $$('button', seg).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === String(f[seg.dataset.opt]))));
   });
-}
-
-/* ---------------- captions: style sheet ---------------- */
-const layerDlg = $('#layerDlg');
-let editId = null;
-
-function openLayer(id) {
-  editId = id;
-  fillLayerDialog();
-  layerDlg.showModal();
-}
-function fillLayerDialog() {
-  const l = layerById(editId);
-  if (!l) return;
-  $('#layerTitle').textContent = l.kind === 'date' ? 'Date' : 'Caption';
-  $('#layerDelete').style.visibility = l.kind === 'date' ? 'hidden' : ''; // the date is switched off, not deleted
-  $('#layerTextBlock').hidden = l.kind !== 'text';
-  $('#layerDateBlock').hidden = l.kind !== 'date';
-  if (l.kind === 'text') {
-    $('#layerSame').checked = !!l.same;
-    $('#layerSame').closest('.list-row').hidden = count() === 1;
-    $('#layerTexts').innerHTML = `${textProxies(l)}<p class="list-foot">Tap the text to edit it on the print.</p>`;
-    bindProxies($('#layerTexts'), l);
-  } else {
-    const f = l.fmt;
-    $('#datePreview').textContent = formatDate(stampFor(l), f);
-    $('#datePreview').style.fontFamily = fontCss(l.font);
-    $$('#layerDateBlock [data-opt]').forEach((seg) => {
-      $$('button', seg).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === String(f[seg.dataset.opt]))));
-    });
-    $('#sepRow').hidden = f.month !== 'num';
-    $('#clockRow').hidden = f.show !== 'datetime';
-    $('#secondsRow').hidden = f.show !== 'datetime';
-    $('#fSeconds').checked = !!f.seconds;
-    $('#dtSource').replaceChildren(...TIME_SOURCES.map((src) => {
-      const b = document.createElement('button');
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(l.source === src.id));
-      b.textContent = src.label;
-      b.addEventListener('click', () => { l.source = src.id; captionsChanged(); fillLayerDialog(); });
-      return b;
-    }));
-    $('#dtSourceNote').textContent = TIME_SOURCES.find((x) => x.id === l.source).detail;
-  }
-  $('#layerFontName').textContent = l.font;
-  $('#layerFontName').style.fontFamily = fontCss(l.font);
-  $('#layerSize').value = l.size;
-  $('#layerSizeVal').textContent = `${l.size.toFixed(1)} mm`;
-  const shown = effectiveShift(l, bandThickness(l.edge));
-  $('#layerShift').value = shown;
-  $('#layerShiftVal').textContent = shiftLabel(shown);
-  $('#layerColors').replaceChildren(...CAPTION_COLORS.map((c) => {
+  $('#sepRow').hidden = f.month !== 'num';
+  $('#clockRow').hidden = f.show !== 'datetime';
+  $('#secondsRow').hidden = f.show !== 'datetime';
+  $('#fSeconds').checked = !!f.seconds;
+  $('#dtSource').replaceChildren(...TIME_SOURCES.map((src) => {
     const b = document.createElement('button');
     b.setAttribute('role', 'radio');
-    b.setAttribute('aria-label', c.label);
-    b.title = c.label;
-    b.setAttribute('aria-checked', String(l.color === c.id));
-    if (c.value) b.style.background = c.value; else { b.textContent = 'A'; b.style.background = frameColor().fill; b.style.color = frameColor().ink; }
-    b.addEventListener('click', () => { l.color = c.id; captionsChanged(); fillLayerDialog(); });
+    b.setAttribute('aria-checked', String(el.source === src.id));
+    b.textContent = src.label;
+    b.addEventListener('click', () => { el.source = src.id; dateTarget.onChange(); fillDateDialog(); });
     return b;
   }));
-  $$('#layerEdge button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === l.edge)));
-  $$('#layerAlign button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === l.align)));
+  $('#dtSourceNote').textContent = TIME_SOURCES.find((x) => x.id === el.source).detail;
 }
-// Composable date format: each segmented control sets one option.
-$$('#layerDateBlock [data-opt]').forEach((seg) => seg.addEventListener('click', (e) => {
+$$('#dateBlock [data-opt]').forEach((seg) => seg.addEventListener('click', (e) => {
   const b = e.target.closest('button');
-  if (!b) return;
+  if (!b || !dateTarget) return;
   const opt = seg.dataset.opt;
-  state.date.fmt[opt] = DATE_OPTIONS[opt].find((v) => String(v) === b.dataset.value);
-  captionsChanged();
-  fillLayerDialog();
+  dateTarget.el.fmt[opt] = DATE_OPTIONS[opt].find((v) => String(v) === b.dataset.value);
+  dateTarget.onChange();
+  fillDateDialog();
 }));
-$('#fSeconds').addEventListener('change', (e) => { state.date.fmt.seconds = e.target.checked; captionsChanged(); fillLayerDialog(); });
-$('#layerSame').addEventListener('change', (e) => {
-  const l = layerById(editId);
-  if (e.target.checked) l.text = l.text || l.texts.find(Boolean) || '';
-  else l.texts = [l.texts[0] || l.text || '', l.texts[1] || l.text || ''];
-  l.same = e.target.checked;
-  captionsChanged({ rebuildList: true });
-  fillLayerDialog();
-});
-/** Thickness (mm) of the border band a caption on `edge` sits in, for the current layout. */
-function bandThickness(edge) {
-  const c = currentLayout().cards[0];
-  return edge === 'bottom' ? c.chin.h : edge === 'top' ? c.top.h : c.left.w;
-}
-function shiftLabel(v) {
-  if (Math.abs(v) < 0.25) return 'Centred';
-  return `${Math.abs(v).toFixed(1)} mm ${v < 0 ? 'closer' : 'further'}`;
-}
-$('#layerShift').addEventListener('input', (e) => {
-  const l = layerById(editId);
-  let v = Number(e.target.value);
-  if (Math.abs(v) < 0.4) v = 0; // snap to centred
-  l.shift = v;
-  l.ref = bandThickness(l.edge); // remember the border it was placed in, to anchor it later
-  $('#layerShiftVal').textContent = shiftLabel(v);
-  captionsChanged();
-});
-$('#layerSize').addEventListener('input', (e) => {
-  const l = layerById(editId);
-  l.size = Number(e.target.value);
-  $('#layerSizeVal').textContent = `${l.size.toFixed(1)} mm`;
-  captionsChanged();
-});
-for (const [id, key] of [['#layerEdge', 'edge'], ['#layerAlign', 'align']]) {
-  $(id).addEventListener('click', (e) => {
-    const b = e.target.closest('button');
-    if (!b) return;
-    const l = layerById(editId);
-    if (key === 'edge' && l.edge !== b.dataset.value) {
-      // Moving to another edge keeps the visible offset, measured in the new border.
-      l.shift = effectiveShift(l, bandThickness(l.edge));
-      l.ref = bandThickness(b.dataset.value);
-    }
-    l[key] = b.dataset.value;
-    captionsChanged({ rebuildList: true });
-    fillLayerDialog();
-  });
-}
-$('#layerFontBtn').addEventListener('click', () => openFontPicker(editId));
-$('#layerDelete').addEventListener('click', () => {
-  state.layers = state.layers.filter((l) => l.id !== editId);
-  layerDlg.close();
-  captionsChanged({ rebuildList: true });
-});
-
-/* ---------------- captions: font picker ---------------- */
-const fontDlg = $('#fontDlg');
-let fontTarget = null;
-let fontGroup = FONT_GROUPS[0].id;
-
-function openFontPicker(layerId) {
-  fontTarget = layerId;
-  const current = layerById(layerId)?.font;
-  fontGroup = FONT_GROUPS.find((g) => g.fonts.includes(current))?.id || FONT_GROUPS[0].id;
-  buildFontPicker();
-  fontDlg.showModal();
-}
-function buildFontPicker() {
-  const l = layerById(fontTarget);
-  $('#fontGroups').replaceChildren(...FONT_GROUPS.map((g) => {
-    const b = document.createElement('button');
-    b.className = 'chip';
-    b.setAttribute('role', 'tab');
-    b.setAttribute('aria-selected', String(g.id === fontGroup));
-    b.setAttribute('aria-pressed', String(g.id === fontGroup));
-    b.textContent = g.label;
-    b.addEventListener('click', () => { fontGroup = g.id; buildFontPicker(); });
-    return b;
-  }));
-  const group = FONT_GROUPS.find((g) => g.id === fontGroup);
-  const sample = l?.kind === 'text'
-    ? (l.same ? l.text : l.texts.find(Boolean)) || 'Summer days'
-    : formatDate(l ? stampFor(l) : today, l?.fmt);
-  $('#fontList').replaceChildren(...group.fonts.map((f) => {
-    const b = document.createElement('button');
-    b.className = 'font-row';
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-checked', String(l?.font === f));
-    b.innerHTML = `<span><span class="sample" style="font-family:${escapeHtml(fontCss(f))}">${escapeHtml(sample)}</span><small>${f}</small></span><span class="check">${icon('check')}</span>`;
-    b.addEventListener('click', () => {
-      const layer = layerById(fontTarget);
-      if (!layer) return;
-      layer.font = f;
-      captionsChanged({ rebuildList: true });
-      buildFontPicker();
-      if (layerDlg.open) fillLayerDialog();
-    });
-    return b;
-  }));
-  loadFonts(group.fonts);
-}
-
-/* ---------------- layout: format, orientation, size & position ---------------- */
-$('#formatSeg').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b || b.dataset.value === state.format) return;
-  state.format = b.dataset.value;
-  selected = null;
-  update();
-});
-$('#orientSeg').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  state.layout.one.orientation = b.dataset.value;
-  Object.assign(state.layout.one, { w: null, h: null, top: null }); // sizes differ between orientations; start from the default
-  update();
-});
-const flipActive = () => state.format === 'one' && state.layout.one.orientation === 'landscape' && state.layout.one.flip !== false;
-const fmtRatio = (r) => {
-  const pick = ASPECTS.flatMap((a) => [[a.w, a.h], [a.h, a.w]]).find(([w, h]) => Math.abs(w / h - r) < 0.01);
-  if (pick) return pick[0] > 10 ? `${pick[0]} : ${pick[1]}` : `${+pick[0].toFixed(1)} : ${+pick[1].toFixed(1)}`;
-  return r < 1 ? `1 : ${(1 / r).toFixed(2)}` : `${r.toFixed(2)} : 1`;
-};
-const mm = (v) => `${v.toFixed(1)} mm`;
-
-function layoutSummary() {
-  const L = lay();
-  const geo = currentLayout();
-  const name = L.aspect === 'custom' ? `Custom ${fmtRatio(geo.ratio)}` : aspectOf(L.aspect)?.label;
-  return `${name}${flipActive() && L.aspect !== 'custom' ? ' · rotated' : ''}${L.w != null || L.top != null ? ' · custom fit' : ''}`;
-}
-function buildLayoutSheet() {
-  const L = lay();
-  const flipped = flipActive();
-  $('#aspectList').replaceChildren(...ASPECTS.map((a) => {
-    const b = document.createElement('button');
-    b.className = 'aspect-tile';
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-checked', String(L.aspect === a.id));
-    const [w, h] = flipped ? [a.h, a.w] : [a.w, a.h];
-    const k = 30 / Math.max(w, h);
-    const label = flipped && a.label.includes(':') ? a.label.split(' : ').reverse().join(' : ') : a.label;
-    b.innerHTML = `<span class="shape"><i style="width:${w * k}px;height:${h * k}px"></i></span><b>${label}</b><small>${a.cameras}</small>`;
-    // A preset keeps the current width and top border; its shape sets the height.
-    b.addEventListener('click', () => { L.aspect = a.id; L.h = null; update(); });
-    return b;
-  }));
-  $('#flipRow').hidden = !(state.format === 'one' && L.orientation === 'landscape');
-  $('#flipToggle').checked = L.flip !== false;
-  $('#layoutFoot').textContent = state.format === 'two'
-    ? 'Always centred left to right, so the sheet is still cut straight down the middle.'
-    : 'Always centred left to right on the sheet.';
-  fitLabels();
-  drawLayoutPreview();
-}
-function fitLabels() {
-  const geo = currentLayout();
-  const { win } = geo.cards[0];
-  $('#widthRange').value = geo.w;
-  $('#widthVal').textContent = mm(win.w);
-  $('#heightRange').max = String(Math.max(0.08, 1 - geo.top));
-  $('#heightRange').value = geo.h;
-  $('#heightVal').textContent = mm(win.h);
-  $('#topRange').max = String(Math.max(0, 1 - geo.h));
-  $('#topRange').value = geo.top;
-  $('#topVal').textContent = mm(win.y);
-  $('#shapeNote').textContent = lay().aspect === 'custom' ? `· custom ${fmtRatio(geo.ratio)}` : '';
-}
-/** One frame, large, inside the sheet: the photo being sized (or the first one added). */
-function drawLayoutPreview() {
-  const cv = $('#layoutCanvas');
-  if (!$('#layoutDlg').open) return;
-  const layout = currentLayout();
-  const slots = renderSlots();
-  const i = Math.max(0, slots.findIndex((x) => x.photo));
-  const card = layout.cards[i];
-  const box = cv.parentElement.getBoundingClientRect();
-  const maxH = Math.min(window.innerHeight * (window.innerWidth <= 860 ? 0.3 : 0.38), 320);
-  const k = Math.min((box.width - 32) / card.w, maxH / card.h);
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  cv.style.width = `${card.w * k}px`;
-  cv.style.height = `${card.h * k}px`;
-  cv.width = Math.round(card.w * k * dpr);
-  cv.height = Math.round(card.h * k * dpr);
-  renderSheet(cv.getContext('2d'), { ...layout, cards: [card] }, [slots[i]], {
-    scale: k * dpr, origin: { x: card.x, y: card.y }, color: frameColor(), marks: false, sourceFor: previewSource,
-  });
-}
-$('[data-open="layoutDlg"]').addEventListener('click', () => requestAnimationFrame(buildLayoutSheet));
-/** Slider drags only redraw; the full rebuild happens when the drag ends. */
-function layoutLive() {
-  saveState();
-  buildSlots();
-  drawPreview();
-  fitLabels();
-  drawLayoutPreview();
-  $('#layoutValue').textContent = layoutSummary();
-}
-/** Pin the current geometry so one slider never moves what the others control. */
-function pin(L, geo) {
-  if (L.w == null) L.w = geo.w;
-  if (L.top == null) L.top = geo.top;
-}
-$('#widthRange').addEventListener('input', (e) => {
-  const L = lay();
-  const geo = currentLayout();
-  pin(L, geo);
-  if (L.aspect === 'custom' && L.h == null) L.h = geo.h;
-  L.w = Number(e.target.value);
-  layoutLive();
-});
-$('#heightRange').addEventListener('input', (e) => {
-  const L = lay();
-  const geo = currentLayout();
-  pin(L, geo);
-  if (L.aspect !== 'custom') {
-    L.aspect = 'custom';
-    $$('#aspectList .aspect-tile').forEach((t) => t.setAttribute('aria-checked', 'false'));
-  }
-  L.h = Number(e.target.value);
-  layoutLive();
-});
-$('#topRange').addEventListener('input', (e) => {
-  const L = lay();
-  const geo = currentLayout();
-  pin(L, geo);
-  if (L.aspect === 'custom' && L.h == null) L.h = geo.h;
-  L.top = Number(e.target.value);
-  layoutLive();
-});
-for (const id of ['#widthRange', '#heightRange', '#topRange']) $(id).addEventListener('change', update);
-$('#flipToggle').addEventListener('change', (e) => { lay().flip = e.target.checked; update(); });
-$('#layoutReset').addEventListener('click', () => {
-  const keepOrientation = lay().orientation;
-  state.layout[state.format] = { ...defaultLayoutFor(state.format), ...(keepOrientation ? { orientation: keepOrientation } : {}) };
-  update();
-});
-window.addEventListener('resize', drawLayoutPreview);
-
-/* ---------------- paper ---------------- */
-const fmtMm = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
-const paperName = (p) => (p.id === 'custom' ? `Custom ${fmtMm(p.w)} × ${fmtMm(p.h)} mm` : PAPERS[p.id] ? p.id : p.kind);
-function paperRow(p) {
-  const b = document.createElement('button');
-  b.className = 'paper-row';
-  b.setAttribute('role', 'radio');
-  b.setAttribute('aria-checked', String(state.paperId === p.id));
-  const title = PAPERS[p.id] ? p.id : p.kind;
-  const sub = PAPERS[p.id] ? `${p.kind} · ${p.note}` : p.note;
-  b.innerHTML = `<span><b>${title}</b><small>${sub}</small></span><span class="dims">${fmtMm(p.w)} × ${fmtMm(p.h)}</span><span class="check">${icon('check')}</span>`;
-  // Picking a paper loads its size into the fields, so it can be tweaked into a custom size.
-  b.addEventListener('click', () => { state.paperId = p.id; state.customPaper = { w: p.w, h: p.h }; update(); });
-  return b;
-}
-function buildPaperList() {
-  const paper = resolvePaper(state.paperId, state.customPaper);
-  $('#paperList').replaceChildren(...Object.values(PAPERS).map(paperRow));
-  $('#otherPaperList').replaceChildren(...Object.values(OTHER_PAPERS).map(paperRow));
-  for (const [id, v] of [['#paperW', paper.w], ['#paperH', paper.h]]) if (document.activeElement !== $(id)) $(id).value = fmtMm(v);
-  $('#paperSizeNote').textContent = state.paperId === 'custom'
-    ? `Custom size, ${CUSTOM_PAPER.min}–${CUSTOM_PAPER.max} mm per side.`
-    : `${paperName(paper)}. Pick another below, or type any size for a custom sheet.`;
-}
-for (const id of ['#paperW', '#paperH']) {
-  $(id).addEventListener('change', () => {
-    const w = parseFloat($('#paperW').value), h = parseFloat($('#paperH').value);
-    if (!Number.isFinite(w) || !Number.isFinite(h)) return;
-    const match = [...Object.values(PAPERS), ...Object.values(OTHER_PAPERS)]
-      .find((p) => Math.abs(p.w - Math.max(w, h)) < 0.05 && Math.abs(p.h - Math.min(w, h)) < 0.05);
-    state.customPaper = { w, h };
-    state.paperId = state.paperId !== 'custom' && match && resolvePaper(state.paperId).w === match.w && resolvePaper(state.paperId).h === match.h
-      ? state.paperId : match ? match.id : 'custom';
-    update();
-  });
-}
-$('#paperSize').addEventListener('submit', (e) => { e.preventDefault(); document.activeElement?.blur(); });
-
-/* ---------------- settings tabs: Frame | Captions | Paper ---------------- */
-function setTab(tab) {
-  if (!['frame', 'captions', 'paper'].includes(tab)) tab = 'frame';
-  const changed = state.tab !== tab;
-  state.tab = tab;
-  $$('#tabBar [data-tab]').forEach((b) => {
-    const on = b.dataset.tab === tab;
-    b.setAttribute('aria-selected', String(on));
-    b.setAttribute('aria-checked', String(on));
-    b.tabIndex = on ? 0 : -1;
-  });
-  $$('.tab-panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === tab));
-  if (changed) saveState();
-}
-$('#tabBar').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-tab]');
-  if (b) setTab(b.dataset.tab);
-});
-$('#tabBar').addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-  const tabs = $$('#tabBar [data-tab]');
-  const i = tabs.findIndex((b) => b.dataset.tab === state.tab);
-  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-  setTab(next.dataset.tab);
-  next.focus();
-});
-
-/* ---------------- master update ---------------- */
-function update() {
-  saveState();
-  const { paper } = currentLayout();
-  sheetEl.style.setProperty('--ar', String(paper.w / paper.h));
-  $('#marksToggle').checked = state.marks;
-  $('#marksRow').hidden = count() !== 2;
-  $$('#formatSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === state.format)));
-  $('#orientSeg').hidden = state.format !== 'one';
-  $$('#orientSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === state.layout.one.orientation)));
-  $('#layoutValue').textContent = layoutSummary();
-  setTab(state.tab);
-  buildLayoutSheet();
-  buildSwatches();
-  buildPaperList();
-  buildTemplateChips();
-  buildLayerList();
-  buildDateRow();
-  buildSlots();
-  buildPhotoList();
-  drawPreview();
-  loadFonts(fontsInUse()).then(drawPreview);
-}
+$('#fSeconds').addEventListener('change', (e) => { if (!dateTarget) return; dateTarget.el.fmt.seconds = e.target.checked; dateTarget.onChange(); fillDateDialog(); });
+$('#dateDlg').addEventListener('close', () => { if (dateTarget) commit(); dateTarget = null; });
 
 /* ---------------- export: highest-resolution PNG (lossless) ---------------- */
 const exportDlg = $('#exportDlg');
 let exportUrl = null;
-
+function photoDpi(i) {
+  const slot = sheet().slots[i];
+  const p = photos[i], { win } = slot.card, c = prints()[i].crop;
+  const crop = cropRect(p.width, p.height, c.rot, win.w / win.h, c.zoom, c.cx, c.cy);
+  return { dpi: effectiveDpi(crop.w, win.w), crop };
+}
+export function quality(dpi) {
+  if (dpi >= 290) return { cls: 'good', label: 'Excellent' };
+  if (dpi >= 200) return { cls: 'ok', label: 'Good' };
+  return { cls: 'low', label: 'Low' };
+}
 async function exportSheet() {
-  const layout = currentLayout();
-  const slots = renderSlots();
+  const layout = sheet();
   const preview = $('#exportPreview');
   const dl = $('#downloadLink');
   const share = $('#shareBtn');
   $('#themeName').value = currentThemeName();
-  const hasPhoto = slots.some((s) => s.photo);
+  const used = items(true);
+  const hasPhoto = used.some(Boolean);
   $('#printActions').hidden = !hasPhoto;
   share.hidden = true;
   if (!hasPhoto) {
@@ -1178,11 +586,7 @@ async function exportSheet() {
   await new Promise((r) => setTimeout(r, 30));
 
   // Empty frames are left off the print entirely.
-  const keep = slots.map((s) => !!s.photo);
-  const sheet = { ...layout, cards: layout.cards.filter((_, i) => keep[i]) };
-  const used = slots.filter((_, i) => keep[i]);
-  const dpis = used.map((s, k) => photoDpi(s.photo, sheet.cards[k].win).dpi);
-
+  const dpis = used.map((it, i) => (it ? photoDpi(i).dpi : 0)).filter(Boolean);
   let dpi = chooseDpi(dpis, layout.paper, MAX_PIXELS), blob = null;
   for (let attempt = 0; attempt < 5 && !blob; attempt++) {
     const px = sheetPixels(layout.paper, dpi);
@@ -1190,7 +594,7 @@ async function exportSheet() {
     cv.width = px.w; cv.height = px.h;
     const ctx = cv.getContext('2d');
     if (ctx) {
-      renderSheet(ctx, sheet, used, { scale: dpi / MM_PER_INCH, color: frameColor(), marks: state.marks, sourceFor: fullSource });
+      renderSheet(ctx, layout, used, { scale: dpi / MM_PER_INCH, marks: doc.marks && count() === 2, sourceFor: fullSource, assets });
       blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
     }
     cv.width = cv.height = 0;
@@ -1216,25 +620,16 @@ async function exportSheet() {
   if (canShare) share.onclick = () => navigator.share({ files: [file], title: 'Twin Mini print' }).catch(() => {});
 }
 $('#exportBtn').addEventListener('click', exportSheet);
-
-/* ---------------- themes: export (Export dialog) and import (? dialog) ---------------- */
-const themeText = () => exportTemplatesText([currentTheme($('#themeName').value.trim() || 'My theme')]);
 $('#themeExport').addEventListener('submit', (e) => {
   e.preventDefault();
-  copyText(themeText(), `“${$('#themeName').value.trim()}”`);
+  copyText(themeText($('#themeName').value.trim() || 'My theme'), `“${$('#themeName').value.trim()}”`);
 });
 $('#themeFile').addEventListener('click', () => {
   const name = $('#themeName').value.trim() || 'My theme';
-  const url = URL.createObjectURL(new Blob([themeText()], { type: 'application/json' }));
+  const url = URL.createObjectURL(new Blob([themeText(name)], { type: 'application/json' }));
   const a = Object.assign(document.createElement('a'), { href: url, download: `${name.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '') || 'theme'}.twinmini.json` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
-$('#helpImportFile').addEventListener('change', async (e) => {
-  const file = e.target.files?.[0];
-  e.target.value = '';
-  if (!file) return;
-  if (importTemplates(await file.text())) $('#help').close();
 });
 
 /* ---------------- bottom sheets: drag the handle (phones) ---------------- */
@@ -1283,18 +678,6 @@ $$('[data-open]').forEach((b) => b.addEventListener('click', () => $(`#${b.datas
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 $$('dialog').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
 
-const fileInput = $('#fileInput');
-let pickTarget = null;
-function pickFiles(i) {
-  pickTarget = i;
-  fileInput.multiple = count() === 2 && (i == null || (!photos[0] && !photos[1]));
-  fileInput.click();
-}
-fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) placeFiles(fileInput.files, pickTarget);
-  fileInput.value = '';
-});
-
 let dragDepth = 0;
 window.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types.includes('Files')) { dragDepth++; document.body.classList.add('dragging'); } });
 window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
@@ -1303,17 +686,17 @@ window.addEventListener('drop', (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove('dragging');
-  if (e.dataTransfer.files.length) placeFiles(e.dataTransfer.files, null);
+  if (e.dataTransfer.files.length) placeFiles(e.dataTransfer.files, editor.isOpen() ? editor.index() : null);
 });
 window.addEventListener('paste', (e) => {
+  if (e.target.closest?.('input, textarea')) return;
   const files = [...(e.clipboardData?.files || [])];
-  if (files.length) placeFiles(files, null);
+  if (files.length) placeFiles(files, editor.isOpen() ? editor.index() : null);
 });
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-
 let toastT;
 function toast(msg) {
   const t = $('#toast');
@@ -1323,6 +706,36 @@ function toast(msg) {
   toastT = setTimeout(() => t.classList.remove('show'), 3200);
 }
 
-new ResizeObserver(() => drawPreview()).observe(sheetEl);
-document.fonts?.ready.then(drawPreview);
-update();
+/* ---------------- the editor ---------------- */
+const editor = createEditor({
+  get doc() { return doc; },
+  photos, assets, today,
+  count, prints, sheet, photoDate, previewSource,
+  commit, undo, redo, canUndo: () => history.length > 1, canRedo: () => future.length > 0,
+  pickFiles, removePhoto, addAsset, openDateFormat, toast, linked: () => layoutsLinked(doc),
+  fontsInUse, photoDpi, quality, escapeHtml,
+});
+
+/* ---------------- start: restore saved photos and pictures ---------------- */
+async function restoreSaved() {
+  const keys = (await allKeys('photos')) || [];
+  await Promise.all(keys.filter((k) => k === 0 || k === 1).map(async (k) => {
+    const blob = await getBlob('photos', k);
+    if (!blob) return;
+    try { photos[k] = await loadPhoto(blob instanceof File ? blob : new File([blob], 'photo', { type: blob.type })); } catch { deleteBlob('photos', k); }
+  }));
+  const used = new Set([...assetIds(doc), ...templates.flatMap((t) => assetIds(t.doc))]);
+  for (const id of (await allKeys('assets')) || []) {
+    if (!used.has(id)) { deleteBlob('assets', id); continue; }
+    try { assets.set(id, await decodeAsset(await getBlob('assets', id))); } catch { /* unreadable */ }
+  }
+  drawHome();
+  editor.refresh();
+}
+
+new ResizeObserver(() => drawHome()).observe(sheetEl);
+document.fonts?.ready.then(drawHome);
+save();
+drawHome();
+loadFonts(fontsInUse()).then(drawHome);
+restoreSaved();

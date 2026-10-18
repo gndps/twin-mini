@@ -1,5 +1,5 @@
-// What is written on the frame borders: text captions plus one optional date per print,
-// and the templates that bundle them. Pure data + formatting; no DOM.
+// Date formatting for date stickers, plus readers for captions saved by older versions
+// (border captions placed by edge) so old saves and themes still open. Pure; no DOM.
 
 export const EDGES = ['bottom', 'top', 'left', 'right'];
 // Distance from the centred spot in the border, in mm: negative moves toward the photo
@@ -49,7 +49,7 @@ export const DATE_OPTIONS = {
 };
 export const defaultDateFormat = () => Object.fromEntries(Object.entries(DATE_OPTIONS).map(([k, v]) => [k, v[0]]));
 
-function sanitizeFormat(f) {
+export function sanitizeFormat(f) {
   const out = defaultDateFormat();
   for (const [k, allowed] of Object.entries(DATE_OPTIONS)) if (f && allowed.includes(f[k])) out[k] = f[k];
   return out;
@@ -87,6 +87,18 @@ export function formatDate(d, fmt) {
   return date;
 }
 
+/** Styles a date sticker cycles through when tapped, like a story's date sticker. */
+export const DATE_STYLES = [
+  {}, { order: 'dmy', month: 'short' }, { year: 'short', sep: ' ' }, { order: 'mdy', month: 'long' },
+  { order: 'dmy', month: 'short', year: 'none', weekday: 'short' }, { show: 'datetime' },
+  { show: 'datetime', order: 'mdy', month: 'short', clock: '12' },
+].map((f) => ({ ...defaultDateFormat(), ...f }));
+export function nextDateStyle(fmt) {
+  const f = sanitizeFormat(fmt);
+  const i = DATE_STYLES.findIndex((s) => Object.keys(s).every((k) => s[k] === f[k]));
+  return { ...DATE_STYLES[(i + 1) % DATE_STYLES.length] };
+}
+
 /** Where the date's timestamp comes from. */
 export const TIME_SOURCES = [
   { id: 'photo', label: 'Photo', detail: 'When the photo was taken (or its file date)' },
@@ -107,25 +119,6 @@ export function textLayer(over = {}) {
 export function dateSettings(over = {}) {
   const { fmt, ...rest } = over;
   return { id: 'date', kind: 'date', on: true, source: 'photo', ...STYLE_DEFAULTS, size: 4.6, align: 'end', ...rest, fmt: { ...defaultDateFormat(), ...fmt } };
-}
-
-// A fresh sheet: no text captions, the date on.
-export const defaultCaptions = () => [];
-export const defaultDate = () => dateSettings();
-
-/** Copy captions with fresh ids (templates must never share objects with the sheet). */
-export const cloneLayers = (layers) => layers.map((l) => ({ ...l, texts: l.texts ? [...l.texts] : undefined, id: uid() }));
-export const cloneDate = (d) => ({ ...d, fmt: { ...d.fmt } });
-
-/**
- * Concrete lines for one frame: its text captions, then the date if it is on.
- * @param {Date} photoDate the photo's timestamp; @param {Date} [now] used when the date source is "now"
- */
-export function resolveCaptions(layers, date, i, photoDate, now = new Date(), { keepEmpty = false } = {}) {
-  const lines = layers.map((l) => ({ ...l, text: ((l.same ? l.text : l.texts?.[i]) || '').trim() }));
-  if (date?.on) lines.push({ ...date, text: formatDate(date.source === 'now' ? now : photoDate, date.fmt) });
-  // keepEmpty: the preview still lays out empty text captions so they can be tapped and typed into.
-  return lines.filter((l) => l.text || (keepEmpty && l.kind === 'text'));
 }
 
 function sanitizeStyle(l, base) {
@@ -170,50 +163,4 @@ export function migrateDate(date, legacyLayers) {
   if (!old) return null;
   const { dateFormat, ...style } = old;
   return migrateDate({ ...style, on: true, fmt: LEGACY_FORMATS[dateFormat] || {} });
-}
-
-/* ---------------- template text format (export / import / site templates) ---------------- */
-// A template is a whole theme:
-//   {"twinmini":"theme","version":3,"name":"…","look":{…},"captions":[…],"date":{…}}
-// Several: an array of those, or {"templates":[…]}. Older caption-only templates (version 1–2,
-// no "look") still import and only change the captions and date.
-// Look fields: format ("two" | "one"), layout {two, one} (aspect, w, h, top; one also has
-//   orientation and flip), color (frame colour id), marks (cut guide), paperId, customPaper {w, h}.
-// Caption fields: font, size (mm), edge, align, color, shift (mm, − = toward the photo),
-//   ref (border thickness in mm when shift was set; anchors the caption, see effectiveShift),
-//   same + text, or texts (one per photo).
-// Date fields: on, source ("photo" | "now"), the same style fields, and fmt:
-//   { show, order, month, year, sep, weekday, clock, seconds } (see DATE_OPTIONS).
-export const TEMPLATE_FORMAT = 'theme';
-const STYLE_KEYS = ['font', 'size', 'edge', 'align', 'color', 'shift', 'ref'];
-
-export function templateToJson(name, layers, date, look) {
-  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
-  return {
-    twinmini: TEMPLATE_FORMAT, version: 3, name,
-    ...(look ? { look: JSON.parse(JSON.stringify(look)) } : {}),
-    captions: layers.map((l) => ({ kind: 'text', ...pick(l, [...STYLE_KEYS, 'same', 'text', 'texts']) })),
-    date: date ? { on: !!date.on, source: date.source, ...pick(date, STYLE_KEYS), fmt: { ...date.fmt } } : { on: false },
-  };
-}
-export const exportTemplatesText = (list) =>
-  JSON.stringify(list.length === 1 ? templateToJson(list[0].name, list[0].layers, list[0].date, list[0].look) : list.map((t) => templateToJson(t.name, t.layers, t.date, t.look)), null, 2);
-
-/** Parse exported text back into [{name, layers, date, look}]; throws a readable Error on bad input.
- *  `look` is passed through raw (null for caption-only templates); the app validates it. */
-export function parseTemplatesText(text) {
-  let data;
-  try { data = JSON.parse(String(text).trim()); } catch { throw new Error('That isn’t template text (invalid JSON).'); }
-  const list = Array.isArray(data) ? data : Array.isArray(data?.templates) ? data.templates : [data];
-  const out = list.map((t) => {
-    if (!t || typeof t !== 'object' || !Array.isArray(t.captions)) throw new Error('Missing "captions" list.');
-    return {
-      name: String(t.name || 'Imported').slice(0, 30),
-      layers: sanitizeLayers(t.captions),
-      date: migrateDate(t.date, t.captions) || dateSettings({ on: false }),
-      look: t.look && typeof t.look === 'object' && !Array.isArray(t.look) ? t.look : null,
-    };
-  });
-  if (!out.length) throw new Error('No templates found.');
-  return out;
 }
