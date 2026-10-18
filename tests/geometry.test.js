@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, PAPERS, DEFAULT_PAPER, MINI_ASPECT } from '../app/src/geometry.js';
+import { sheetLayout, cropRect, effectiveDpi, chooseDpi, sheetPixels, PAPERS, DEFAULT_PAPER, MINI_ASPECT } from '../app/src/geometry.js';
+
+
+// One layout for every print, cards in sheet coordinates (prints face their slot's way).
+function computeLayout(o = {}) {
+  if (typeof o === 'string') o = { paperId: o };
+  const { paperId, customPaper, format = 'two', orientation = format === 'one' ? 'landscape' : 'portrait', aspect, flip, w = null, h = null, top = null } = o;
+  const turn = format === 'one' && orientation === 'landscape' && flip === false;
+  const print = { orientation, layout: { aspect, turn, w, h, top } };
+  const L = sheetLayout({ paperId, customPaper, format, prints: [print, print] });
+  const cards = L.slots.map((s) => ({ x: s.x, y: s.y, w: s.w, h: s.h, win: { ...s.card.win, x: s.x + s.card.win.x }, chin: s.card.chin }));
+  const c = L.slots[0].card;
+  return { paper: L.paper, cutX: L.cutX, cards, ratio: c.ratio, w: c.fw, h: c.fh, top: c.ftop };
+}
 
 const near = (a, b, eps = 0.01) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`);
 
@@ -22,14 +35,14 @@ test('every paper splits into two equal halves cut down the middle', () => {
   }
 });
 
-test('frame window keeps the Instax 46:62 shape with equal side and top borders and a chin', () => {
+test('frame window keeps the Instax 46:62 shape, top border no wider than the sides, and a chin', () => {
   for (const id of Object.keys(PAPERS)) {
     const { cards } = computeLayout(id);
     for (const c of cards) {
       near(c.win.w / c.win.h, MINI_ASPECT, 1e-3);
       const side = c.win.x - c.x;
       near(c.x + c.w - (c.win.x + c.win.w), side);
-      near(c.win.y - c.y, side);
+      assert.ok(c.win.y - c.y <= side + 1e-6, `${id}: top ${c.win.y} vs side ${side}`);
       assert.ok(c.chin.h > side * 0.5, `${id}: chin ${c.chin.h} vs side ${side}`);
       near(c.chin.y + c.chin.h, c.h);
     }
@@ -126,7 +139,7 @@ test('One Wide: landscape rotates the shape on its side by default and can rotat
   near(land.ratio, 3 / 2, 2e-3);
   assert.ok(land.cards[0].chin.h > land.cards[0].win.y, 'chin below the photo');
   near(computeLayout({ format: 'one', flip: false }).ratio, 2 / 3, 2e-3);
-  near(computeLayout({ format: 'two', flip: true }).ratio, 46 / 62, 1e-3);
+  near(computeLayout({ format: 'two' }).ratio, 46 / 62, 1e-3);
 });
 
 test('One Wide portrait: upright sheet, upright photo, flip ignored', () => {
@@ -155,4 +168,31 @@ test('custom paper: any size, normalised to landscape and clamped', () => {
   const L = computeLayout({ paperId: 'custom', customPaper: { w: 120, h: 90 } });
   near(L.paper.w, 120); near(L.cutX, 60);
   assert.equal(resolvePaper('nope').id, 'RP-108');
+});
+
+import { cardLayout, cardToSheet, CORNER } from '../app/src/geometry.js';
+
+test('each print has its own orientation; a landscape print is turned a quarter in its half', () => {
+  const L = sheetLayout({ format: 'two', prints: [{ orientation: 'portrait' }, { orientation: 'landscape' }] });
+  assert.deepEqual(L.slots.map((s) => s.rot), [0, 90]);
+  const [a, b] = L.slots;
+  near(a.card.w, 74); near(a.card.h, 100);
+  near(b.card.w, 100); near(b.card.h, 74);
+  assert.ok(b.card.win.w > b.card.win.h, 'the shape turns with the card');
+  // Card corners map back onto the right half of the sheet.
+  const p = cardToSheet(b, 0, 0), q = cardToSheet(b, b.card.w, b.card.h);
+  near(p.x, 148); near(p.y, 0); near(q.x, 74); near(q.y, 100);
+});
+
+test('turning the shape puts a portrait window on a landscape card', () => {
+  const c = cardLayout({ W: 148, H: 100, aspect: '2x3', turn: true, size: 0.82 });
+  assert.ok(c.win.h > c.win.w);
+});
+
+test('photo corners default to the measured Instax rounding and can be tuned', () => {
+  const c = cardLayout({ W: 74, H: 100 });
+  near(c.radius, CORNER.instax * c.win.w, 1e-3);
+  assert.ok(c.radius > 0.2 && c.radius < 0.4, `${c.radius} mm`);
+  near(cardLayout({ W: 74, H: 100, corner: 0 }).radius, 0);
+  near(cardLayout({ W: 74, H: 100, corner: 0.05 }).radius, 0.05 * 56, 1e-2);
 });

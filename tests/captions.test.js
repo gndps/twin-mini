@@ -31,10 +31,7 @@ test('non-JPEG or missing EXIF gives null', () => {
   assert.equal(parseExifDate('0000:00:00 00:00:00'), null);
 });
 
-import {
-  formatDate, defaultDateFormat, DATE_OPTIONS, dateSettings, textLayer, resolveCaptions, sanitizeLayers,
-  migrateDate, cloneLayers, defaultCaptions, defaultDate, exportTemplatesText, parseTemplatesText, SHIFT,
-} from '../app/src/captions.js';
+import { formatDate, defaultDateFormat, DATE_OPTIONS, migrateDate, sanitizeLayers, SHIFT, nextDateStyle, DATE_STYLES, effectiveShift } from '../app/src/captions.js';
 
 const D = new Date(2026, 9, 7, 16, 5, 9); // Wed 7 Oct 2026, 16:05:09
 const fmt = (o) => formatDate(D, { ...defaultDateFormat(), ...o });
@@ -61,91 +58,103 @@ test('date & time: 24 h or 12 h AM/PM, seconds optional', () => {
   assert.deepEqual(DATE_OPTIONS.show, ['date', 'datetime']);
 });
 
-test('one date per print, independent of text captions; photo time by default, or now', () => {
-  const photo = new Date(2020, 1, 3, 8, 0), now = new Date(2026, 9, 17, 21, 30);
-  const notes = [textLayer({ texts: ['beach', 'us'] })];
-  const d = dateSettings();
-  assert.equal(d.on, true);
-  assert.equal(d.source, 'photo');
-  assert.deepEqual(resolveCaptions(notes, d, 0, photo, now).map((l) => l.text), ['beach', '2020.02.03']);
-  assert.deepEqual(resolveCaptions(notes, { ...d, source: 'now' }, 1, photo, now).map((l) => l.text), ['us', '2026.10.17']);
-  assert.deepEqual(resolveCaptions(notes, { ...d, on: false }, 0, photo, now).map((l) => l.text), ['beach']);
-  assert.deepEqual(resolveCaptions([], d, 0, photo, now).map((l) => l.text), ['2020.02.03']);
+test('tapping a date cycles through its styles and wraps around', () => {
+  let f = defaultDateFormat();
+  const seen = [];
+  for (let k = 0; k < DATE_STYLES.length; k++) { f = nextDateStyle(f); seen.push(formatDate(D, f)); }
+  assert.equal(new Set(seen).size, DATE_STYLES.length);
+  assert.equal(seen.at(-1), '2026.10.07');
+  assert.equal(formatDate(D, nextDateStyle({ order: 'xyz', month: 'long', weekday: 'long' })), formatDate(D, DATE_STYLES[0]));
 });
 
-test('text captions only; date layers from older saves become the single date setting', () => {
-  const legacy = [{ kind: 'text', texts: ['a', 'b'] }, { kind: 'date', dateFormat: 'dmy-t12', edge: 'right', size: 3 }, { kind: 'date', dateFormat: 'dots' }];
+test('older saves: date layers become a date, junk is cleaned', () => {
+  const legacy = [{ kind: 'text', texts: ['a', 'b'] }, { kind: 'date', dateFormat: 'dmy-t12', edge: 'right', size: 3 }];
   assert.equal(sanitizeLayers(legacy).length, 1);
   const d = migrateDate(undefined, legacy);
-  assert.equal(d.on, true);
   assert.equal(d.edge, 'right');
   assert.deepEqual([d.fmt.show, d.fmt.order, d.fmt.month, d.fmt.clock], ['datetime', 'dmy', 'short', '12']);
-  assert.equal(migrateDate(undefined, [{ kind: 'text' }]), null);
   const bad = migrateDate({ on: true, fmt: { order: 'xyz', clock: '25' }, shift: 99 });
   assert.equal(bad.fmt.order, 'ymd');
-  assert.equal(bad.fmt.clock, '24');
   assert.equal(bad.shift, SHIFT.max);
-});
-
-test('a fresh sheet has no text captions and the date on', () => {
-  assert.deepEqual(defaultCaptions(), []);
-  assert.equal(defaultDate().on, true);
-  assert.equal(defaultDate().kind, 'date');
-});
-
-test('template text round-trips captions and the date', () => {
-  const layers = [textLayer({ texts: ['a', 'b'], font: 'Pacifico', edge: 'top', shift: -6.5 })];
-  const date = dateSettings({ source: 'now', color: 'stamp', fmt: { show: 'datetime', clock: '12', weekday: 'short' } });
-  const text = exportTemplatesText([{ name: 'Retro', layers, date }]);
-  assert.match(text, /"twinmini": "theme"/);
-  const [back] = parseTemplatesText(text);
-  assert.equal(back.name, 'Retro');
-  assert.deepEqual(back.layers[0].texts, ['a', 'b']);
-  assert.equal(back.layers[0].shift, -6.5);
-  assert.equal(back.date.source, 'now');
-  assert.deepEqual([back.date.fmt.show, back.date.fmt.clock, back.date.fmt.weekday], ['datetime', '12', 'short']);
-  const many = exportTemplatesText([{ name: 'A', layers, date }, { name: 'B', layers: [], date: { ...date, on: false } }]);
-  assert.deepEqual(parseTemplatesText(many).map((t) => [t.name, t.date.on]), [['A', true], ['B', false]]);
-  // version-1 text (date as a caption) still imports
-  const v1 = '{"twinmini":"caption-template","version":1,"name":"Old","captions":[{"kind":"date","dateFormat":"stamp","color":"stamp"}]}';
-  const [old] = parseTemplatesText(v1);
-  assert.equal(old.layers.length, 0);
-  assert.equal(formatDate(D, old.date.fmt), "'26 10 07");
-});
-
-test('a theme carries its name and whole look; caption-only templates have none', () => {
-  const look = { format: 'one', layout: { two: { aspect: 'mini', w: 0.7, h: null, top: 0.1 }, one: { aspect: 'square', orientation: 'portrait', flip: false, w: null, h: null, top: null } }, color: 'cream', marks: false, paperId: 'custom', customPaper: { w: 120, h: 90 } };
-  const text = exportTemplatesText([{ name: 'Mini-tiddu', layers: [], date: dateSettings(), look }]);
-  const [back] = parseTemplatesText(text);
-  assert.equal(back.name, 'Mini-tiddu');
-  assert.deepEqual(back.look, look);
-  assert.equal(JSON.parse(text).version, 3);
-  const [v2] = parseTemplatesText('{"twinmini":"caption-template","version":2,"name":"Caps","captions":[]}');
-  assert.equal(v2.look, null);
-});
-
-test('import rejects junk with a readable message', () => {
-  assert.throws(() => parseTemplatesText('hello'), /invalid JSON/);
-  assert.throws(() => parseTemplatesText('{"name":"x"}'), /captions/);
-});
-
-test('cloneLayers gives fresh ids', () => {
-  const [a] = [textLayer()];
-  assert.notEqual(cloneLayers([a])[0].id, a.id);
-});
-
-import { effectiveShift } from '../app/src/captions.js';
-
-test('caption anchoring: toward the photo keeps the photo-edge gap, away keeps the paper-edge gap', () => {
-  // Set in a 16 mm chin: line centre 8 mm from each side, shifted 3 mm.
-  const closer = { shift: -3, ref: 16 }, further = { shift: 3, ref: 16 }, centred = { shift: 0, ref: 16 };
-  for (const band of [10, 16, 30]) {
-    const fromPhoto = (l) => band / 2 + effectiveShift(l, band);  // gap: photo edge → line centre
-    const fromEdge = (l) => band / 2 - effectiveShift(l, band);   // gap: paper edge → line centre
-    assert.equal(fromPhoto(closer), 5);
-    assert.equal(fromEdge(further), 5);
-    assert.equal(effectiveShift(centred, band), 0);
-  }
-  // Captions saved before anchoring existed behave as before.
   assert.equal(effectiveShift({ shift: -4 }, 30), -4);
+});
+
+import {
+  defaultDoc, sanitizeDoc, exportThemesText, parseThemesText, legacyDoc, layoutsLinked, textEl, cardOf,
+} from '../app/src/model.js';
+
+test('a fresh document: two portrait Minis and a landscape One Wide, each with the date in its chin', () => {
+  const d = defaultDoc();
+  assert.deepEqual(d.two.map((p) => p.orientation), ['portrait', 'portrait']);
+  assert.equal(d.one[0].orientation, 'landscape');
+  for (const p of [...d.two, ...d.one]) {
+    assert.equal(p.elements.length, 1);
+    assert.equal(p.elements[0].type, 'date');
+    assert.equal(p.elements[0].align, 'right');
+    assert.ok(p.elements[0].y > 0.8, 'in the chin');
+  }
+  assert.equal(layoutsLinked(d), true);
+  d.two[1].orientation = 'landscape';
+  assert.equal(layoutsLinked(d), false, 'prints facing different ways never share a layout');
+});
+
+test('a theme round-trips both formats, their prints and elements, without photo crops', () => {
+  const d = defaultDoc();
+  d.two[0].elements.push(textEl({ text: 'beach', font: 'Pacifico', x: 0.3, y: 0.88, rot: 12, bg: 'solid', color: '#E5484D' }));
+  d.two[1].color = 'sage';
+  d.two[0].crop.zoom = 3;
+  d.one[0].layout = { ...d.one[0].layout, aspect: 'square', corner: 0.02, w: 0.5 };
+  const text = exportThemesText([{ name: 'Mini-tiddu', doc: d }]);
+  assert.equal(JSON.parse(text).version, 4);
+  const [t] = parseThemesText(text);
+  assert.equal(t.name, 'Mini-tiddu');
+  assert.equal(t.elementsOnly, false);
+  const el = t.doc.two[0].elements.at(-1);
+  assert.deepEqual([el.text, el.font, el.rot, el.bg, el.color], ['beach', 'Pacifico', 12, 'solid', '#E5484D']);
+  assert.equal(t.doc.two[1].color, 'sage');
+  assert.equal(t.doc.two[0].crop.zoom, 1);
+  assert.deepEqual([t.doc.one[0].layout.aspect, t.doc.one[0].layout.corner, t.doc.one[0].layout.w], ['square', 0.02, 0.5]);
+});
+
+test('older caption templates import as elements placed where the border captions were', () => {
+  const v2 = { twinmini: 'caption-template', version: 2, name: 'Caps', captions: [{ kind: 'text', same: true, text: 'hello', edge: 'bottom', align: 'start', size: 5 }], date: { on: true, edge: 'left', align: 'end', size: 3 } };
+  const [t] = parseThemesText(JSON.stringify(v2));
+  assert.equal(t.elementsOnly, true);
+  const card = cardOf(t.doc, 'two', 0);
+  const [txt, date] = t.doc.two[0].elements;
+  assert.equal(txt.text, 'hello');
+  assert.equal(txt.align, 'left');
+  assert.ok(Math.abs(txt.x * card.w - card.win.x) < 1e-6, 'starts at the photo edge');
+  assert.ok(txt.y * card.h > card.win.y + card.win.h, 'in the chin');
+  assert.equal(date.type, 'date');
+  assert.equal(date.rot, 270);
+  assert.ok(date.x * card.w < card.win.x, 'in the left border');
+  const look = { format: 'one', layout: { one: { orientation: 'portrait', aspect: 'square' } }, color: 'cream', paperId: 'KL-36IP' };
+  const d = legacyDoc(look, [], { on: false });
+  assert.deepEqual([d.format, d.paperId, d.one[0].orientation, d.one[0].layout.aspect, d.one[0].color], ['one', 'KL-36IP', 'portrait', 'square', 'cream']);
+  assert.equal(d.one[0].elements.length, 0);
+});
+
+test('import rejects junk with a readable message; sanitizing drops bad elements', () => {
+  assert.throws(() => parseThemesText('hello'), /invalid JSON/);
+  assert.throws(() => parseThemesText('{"name":"x"}'), /captions/);
+  const d = sanitizeDoc({ two: [{ elements: [{ type: 'nope' }, { type: 'emoji', char: '🌸', size: 999 }, { type: 'sticker', sticker: 'missing' }] }] });
+  assert.equal(d.two[0].elements.length, 1);
+  assert.equal(d.two[0].elements[0].size, 80);
+});
+
+import { remapElements } from '../app/src/model.js';
+import { cardLayout } from '../app/src/geometry.js';
+
+test('elements keep their place when the layout changes: chin text stays in the chin', () => {
+  const from = cardLayout({ W: 74, H: 100 });
+  const to = cardLayout({ W: 74, H: 100, w: 0.9, top: 0.03 });
+  const chinY = (c) => (c.win.y + c.win.h + c.h) / 2;
+  const print = { elements: [{ x: 0.5, y: chinY(from) / 100 }, { x: (from.win.x + from.win.w) / 74, y: 0.5 }] };
+  remapElements(print, from, to);
+  assert.ok(Math.abs(print.elements[0].y * 100 - chinY(to)) < 1e-6);
+  assert.ok(Math.abs(print.elements[1].x * 74 - (to.win.x + to.win.w)) < 1e-6, 'on the photo edge');
+  const land = cardLayout({ W: 100, H: 74, size: 0.82 });
+  remapElements(print, to, land);
+  assert.ok(print.elements[0].y * 74 > land.win.y + land.win.h, 'still in the chin after turning landscape');
 });
