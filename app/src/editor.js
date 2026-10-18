@@ -70,7 +70,7 @@ export function createEditor(app) {
   /* ---------------- open / close ---------------- */
   function openEditor(i) {
     idx = clamp(i, 0, app.count() - 1);
-    selId = null; tool = null;
+    selId = null; tool = 'photo'; // opens on the photo tools
     open = true;
     root.hidden = false;
     document.body.classList.add('editing');
@@ -465,7 +465,8 @@ export function createEditor(app) {
       return;
     }
     if (mode === 'photo' || mode === 'blank') {
-      if (selId || tool) { selId = null; tool = null; buildPanel(); return; }
+      if (selId) { selId = null; if (!['photo', 'frame'].includes(tool)) tool = null; buildDeck(); buildPanel(); return; }
+      if (tool && !['photo', 'frame'].includes(tool)) { tool = null; buildDeck(); buildPanel(); fit(); return; }
       addText(p);
     }
   }
@@ -541,13 +542,13 @@ export function createEditor(app) {
     if (!el) {
       const p = print();
       btns = [
+        deckBtn('photo', 'Photo', toggleTool('photo'), { pressed: tool === 'photo' }),
         deckBtn('text', 'Text', () => addText()),
         deckBtn('sticker', 'Stickers', openStickers),
         deckBtn('date', 'Date', addDate),
         deckBtn('layout', 'Layout', toggleTool('layout'), { pressed: tool === 'layout' }),
         deckBtn(p.orientation === 'portrait' ? 'portrait' : 'landscape', p.orientation === 'portrait' ? 'Portrait' : 'Landscape', toggleOrientation),
         deckBtn('frame', 'Frame', toggleTool('frame'), { pressed: tool === 'frame' }),
-        deckBtn('photo', 'Photo', toggleTool('photo'), { pressed: tool === 'photo' }),
       ];
     } else {
       const isText = el.type === 'text' || el.type === 'date';
