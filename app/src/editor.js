@@ -712,27 +712,77 @@ export function createEditor(app) {
   }
 
   function fontPanel(el) {
-    const r = row('pn-row pn-scroll pn-fonts');
+    const r = row('font-picker');
     fillFonts(r, el, () => { changed(); });
     panel.append(r);
-    requestAnimationFrame(() => r.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
   }
-  function fillFonts(r, el, onPick) {
+  /**
+   * Fonts in one sliding strip, grouped by style, with the styles as tabs above it. Tapping a tab
+   * slides to its first font; sliding past a style's last font moves the tab to the next style.
+   */
+  function fillFonts(host, el, onPick) {
     loadFonts(ALL_FONTS).then(() => { draw(); });
-    r.replaceChildren(...ALL_FONTS.map((f) => {
-      const b = document.createElement('button');
-      b.className = 'font-pill';
-      b.style.fontFamily = fontCss(f);
-      b.textContent = f;
-      b.setAttribute('aria-pressed', String(el.font === f));
-      b.addEventListener('click', () => {
-        el.font = f;
-        r.querySelectorAll('.font-pill').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-        loadFonts([f]).then(draw);
-        onPick();
+    const tabs = Object.assign(document.createElement('div'), { className: 'font-tabs' });
+    const strip = Object.assign(document.createElement('div'), { className: 'font-strip' });
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Font styles');
+    const firstOf = new Map();
+    for (const g of FONT_GROUPS) {
+      const t = document.createElement('button');
+      t.className = 'font-tab';
+      t.textContent = g.label;
+      t.dataset.group = g.id;
+      t.setAttribute('role', 'tab');
+      t.addEventListener('click', () => {
+        const first = firstOf.get(g.id);
+        setTab(g.id);
+        lock = true;
+        strip.scrollTo({ left: first.offsetLeft - 10, behavior: 'smooth' });
+        clearTimeout(lockT);
+        lockT = setTimeout(() => { lock = false; }, 600);
       });
-      return b;
-    }));
+      tabs.append(t);
+      g.fonts.forEach((f, k) => {
+        const b = document.createElement('button');
+        b.className = `font-pill${k === 0 ? ' group-start' : ''}`;
+        b.style.fontFamily = fontCss(f);
+        b.textContent = f;
+        b.dataset.group = g.id;
+        b.setAttribute('aria-pressed', String(el.font === f));
+        b.addEventListener('click', () => {
+          el.font = f;
+          strip.querySelectorAll('.font-pill').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+          setTab(g.id);
+          loadFonts([f]).then(draw);
+          onPick();
+        });
+        if (k === 0) firstOf.set(g.id, b);
+        strip.append(b);
+      });
+    }
+    let lock = false, lockT = 0, current = null;
+    function setTab(id) {
+      if (id === current) return;
+      current = id;
+      tabs.querySelectorAll('.font-tab').forEach((t) => {
+        const on = t.dataset.group === id;
+        t.setAttribute('aria-selected', String(on));
+        if (on) tabs.scrollTo({ left: t.offsetLeft - (tabs.clientWidth - t.offsetWidth) / 2, behavior: 'smooth' });
+      });
+    }
+    // The style under the left third of the strip is the current tab.
+    strip.addEventListener('scroll', () => {
+      if (lock) return;
+      const x = strip.scrollLeft + strip.clientWidth * 0.3;
+      let id = FONT_GROUPS[0].id;
+      for (const g of FONT_GROUPS) if (firstOf.get(g.id).offsetLeft - 10 <= x) id = g.id;
+      if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 2) id = FONT_GROUPS.at(-1).id;
+      setTab(id);
+    }, { passive: true });
+    host.replaceChildren(tabs, strip);
+    const on = strip.querySelector('[aria-pressed="true"]') || strip.firstElementChild;
+    setTab(on.dataset.group);
+    requestAnimationFrame(() => { strip.scrollLeft = on.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2; });
   }
   function colorPanel(el) {
     const r = row('pn-row pn-scroll pn-swatches');
