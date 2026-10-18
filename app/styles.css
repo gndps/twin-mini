@@ -567,7 +567,7 @@ body.editing { overflow: hidden; }
 
   .ed-deck { justify-content: flex-start; }
   .ed-deck { padding-left: 4px; padding-right: 4px; gap: 0; }
-  .ed-deck .deck-btn { min-width: 51px; padding: 6px 2px; font-size: 11.5px; }
+  .ed-deck .deck-btn { flex: 1 0 auto; min-width: 51px; padding: 6px 2px; font-size: 11.5px; }
   .te-body { padding: 8px 48px 8px 52px; }
 }
 @media (max-width: 860px) and (orientation: portrait) {
