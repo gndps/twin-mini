@@ -4,47 +4,71 @@
 
 Instax-style framed prints from a **Canon SELPHY CP1500** (or any 4×6 / postcard photo printer).
 
-Add one or two photos → get one print-ready JPEG: two Instax-style frames, each filling half of the sheet. Print it from the SELPHY app and cut down the middle.
+Add one or two photos, tap a print to decorate it like a story, and get one print-ready PNG: two Instax-style frames, each filling half of the sheet. Print it from the SELPHY app and cut down the middle.
 
-Everything runs in the browser. Photos are never uploaded; settings and caption templates are saved in the browser's local storage.
+Everything runs in the browser. Photos are never uploaded; edits, photos and themes are saved in the browser.
 
 ## Features
 
-- **Settings in three tabs:** **Photos** (your photos, layout, photo size & position, frame colour, cut guide), **Captions** (templates, date, captions) and **Paper**. Tapping a photo on the preview opens its editor (turn, flip, crop & zoom); tapping a caption on the print opens Captions.
-- **Two Minis or One Wide** (Photos tab). Two Minis splits the sheet into two Instax-style cards that you cut down the middle. One Wide fills the sheet with a single frame, in landscape or portrait (portrait files come out upright and the SELPHY app turns them onto the paper).
-- **Photo size & position.** A sheet with a large single-photo preview and three sliders: **Width** (grows evenly on both sides), **Height** (grows downward, top border stays put) and **Top border**. Shape presets (Instax Mini 46×62, Square for Instax Square / Polaroid, 4:5, 3:4, 2:3 for 35 mm / ZINK, 5:7, 9:16) keep their shape as you change the width; dragging Height makes it a custom shape. Always centred left to right, so Two Minis is still a single straight cut. Landscape One Wide shows the shape rotated, with a switch to turn it back. Two Minis and One Wide remember their own settings.
-- **Paper** (its own tab). Canon SELPHY CP1500 sets by name: RP-108 (default), KP-108IN, RP-54, KP-36IP (postcard), KL-36IP (L size), KC-36IP and KC-18IF (card size), KC-18IS (square label). Picking one fills in its size, which you can edit into any custom size (40–420 mm per side). A second section lists other common printer paper: 4×6, 5×7, 3.5×5, 4×4, 8×10 in, A6, A5, A4, US Letter.
+- **Edit on the print, like a story.** Tap a print to open it almost full screen. Everything happens on the canvas, the way Instagram Stories works:
+  - **Drag, pinch and twist.** One finger moves text, the date, emoji and stickers. Pinching scales them and twisting with two fingers rotates them. They snap to the card centre, the photo's edges and the middle of each border, and rotation snaps to 0°, 90°, 180° and 270°.
+  - **Delete and layering.** Drag an element onto the bin that appears at the bottom to delete it. The element you touch comes to the top.
+  - **Tap to edit.** Tap empty space to add text. Tap a selected text to retype it in a full-screen text tool with fonts above the keyboard, a colour row, a size slider, alignment and background styles. Tap a selected date to cycle through its styles.
+  - **Crop on the canvas.** Pinch or drag the photo itself to crop it.
+  - **Mouse and keyboard.** Use the corner handle to scale and rotate, the wheel to resize, Delete to remove, the arrow keys to nudge, ⌘D to duplicate and ⌘Z / ⇧⌘Z to undo and redo.
+- **A deck instead of settings.** The editor's bottom deck has Text, Stickers, Date, Layout, Portrait/Landscape, Frame and Photo. Selecting an element swaps in its own tools: Edit or Format, Font, Colour, Background, Align, Size, Duplicate and Delete. The home screen's deck has Two Minis / One Wide, Paper, Cut guide, Swap, Themes and Export.
+- **Layout by dragging lines.** **Layout** extends the photo's edges into lines across the print:
+  - the sides set the width (it grows evenly on both sides);
+  - the top line sets the top border, and snaps to the side border for the Instax look;
+  - the bottom line sets the height.
+
+  Shape presets are Instax Mini 46×62, Square, 4:5, 3:4, 2:3, 5:7 and 9:16, plus **Turn shape** and **Reset size**. Text and stickers stay in their part of the print as the layout changes: chin text stays in the chin.
+- **Rounded photo corners.** The photo window has the very slight corner rounding of Instax film by default: about 0.23 mm on a Mini's 46 mm side (0.5 % of the short side), measured from high-resolution scans of real Mini and Square prints, since Fujifilm publishes no figure. A **Corners** slider in Layout tunes it from square to well rounded.
+- **Every print is independent.** Each print has its own orientation (portrait or landscape, even in Two Minis), layout, frame colour, text, stickers and photo crop. Two Minis and One Wide keep their own prints.
+  - In Two Minis, prints facing the same way share one layout by default (**Same on both**, which can be switched off). A portrait and a landscape print always have their own.
+  - A landscape print in Two Minis is turned a quarter in its half of the sheet, so it still cuts down the middle.
+- **Stickers.** The tray has a date or date & time sticker, text, vector stickers (hearts, stars, sparkles, flowers, sun, moon, washi tapes, a doodled arrow, circle and underline…), emoji (pick from the grid or type any) and your own picture or GIF (printed as a still).
+- **Two Minis or One Wide.** Two Minis splits the sheet into two Instax-style cards that you cut down the middle. One Wide fills the sheet with one print; a portrait One Wide file comes out upright and the SELPHY app turns it onto the paper.
+- **Paper.** Canon SELPHY CP1500 sets by name: RP-108 (default), KP-108IN, RP-54, KP-36IP (postcard), KL-36IP (L size), KC-36IP and KC-18IF (card size), KC-18IS (square label). Picking one fills in its size, which you can edit into any custom size (40–420 mm per side). Other common printer paper is listed too: 4×6, 5×7, 3.5×5, 4×4, 8×10 in, A6, A5, A4, US Letter.
 - **Best possible file.** Always a lossless PNG at the resolution of your sharpest photo (no fixed cap, only the browser's canvas limit), with the dpi written into the file.
-- **Date.** One date per print, switched on or off on its own, separate from the captions. Show the date or date & time, and compose the format: order (Y M D / D M Y / M D Y), month (10 / Oct / October), year (2026 / '26 / none), separator, weekday (none / Sat / Saturday), 24-hour or 12-hour AM/PM, seconds. The timestamp comes from the photo (EXIF capture time, else file time) or *now*.
-- **Captions.** Any number of text captions on any edge with their own font, size, alignment, colour and distance from the photo (closer, further, or overlapping it); each photo can have its own text. When the photo is resized, a caption pulled toward the photo keeps its gap to the photo, one pushed away keeps its gap to the paper edge, and a centred one stays centred. A caption too long for its edge shrinks to fit. 37 free fonts in six styles.
-- **Themes.** A template is the whole look: layout, frame colour, cut guide, paper, captions and date, with its name. Save your own (kept on the device until you delete them); site themes and yours appear as chips. **Export** copies the current theme as text or saves it as a `.twinmini.json` file; **? → Import a theme** pastes or opens one, saves it under its name and applies it.
-- **Caption size.** The size you pick is always used; a line only shrinks if it would run off the card.
-- **Cut guide.** Optional: short, sparse hairline dashes evenly spaced down the whole centre line, nothing else.
-- **Orientation.** EXIF orientation is honoured; each photo can be turned left/right or flipped 180° (rotation only, never mirrored), panned and zoomed.
-- **Phone first.** The preview stays pinned at the top while you scroll; option sheets take at most half the screen so the preview stays visible (Photo size & position has its own large preview); tap a caption on the print to type it in place; large touch targets, full-screen crop editor with pinch-to-zoom, share straight to the SELPHY app.
+- **Date.** On by default in each print's chin, from the photo (EXIF capture time, else file time) or *now*. **Format** composes it: date or date & time, order (Y M D / D M Y / M D Y), month (10 / Oct / October), year (2026 / '26 / none), separator, weekday, 24-hour or 12-hour AM/PM and seconds.
+- **Themes.** A theme is the whole document without the photos: both formats, every print's orientation, layout, frame, text, stickers (pictures included) and date, plus paper and cut guide, under a name.
+  - Save your own in **Themes**; they stay on the device until you delete them. Site themes and yours appear as chips.
+  - **Export** copies the current theme as text or saves it as a `.twinmini.json` file.
+  - **? → Import a theme** pastes or opens one, saves it under its name and applies it.
+  - Caption templates from earlier versions still import, and your saved settings carry over.
+- **Saved as you go.** Edits, photos and pictures are kept in this browser (local storage and IndexedDB), so a reload brings everything back. Nothing is uploaded.
 
 ## Shipping themes with the site
 
-In the app, use **Export → Theme → Copy** (or **Captions → Templates → Copy all my templates**). Paste the text into `app/templates.json`:
+In the app, use **Export → Theme → Copy** (or **Themes → Copy all my themes**). Paste the text into `app/templates.json`. A single exported theme, an array of them, or `{ "templates": [...] }` all work, both there and in the app's Import box. Push, and every visitor sees them as chips.
 
 ```json
-{
-  "templates": [
-    { "twinmini": "theme", "version": 3, "name": "Retro stamp",
-      "look": { "format": "two", "color": "cream", "marks": true, "paperId": "RP-108",
-                "layout": { "two": { "aspect": "mini", "w": null, "h": null, "top": null } } },
-      "captions": [],
-      "date": { "on": true, "font": "VT323", "size": 4.4, "edge": "bottom", "align": "end", "color": "stamp",
-                "fmt": { "year": "short", "sep": " " } } }
-  ]
-}
+{ "twinmini": "theme", "version": 4, "name": "Retro stamp",
+  "sheet": { "format": "two", "paperId": "RP-108", "customPaper": { "w": 148, "h": 100 }, "marks": true, "linked": true },
+  "two": [
+    { "orientation": "portrait", "color": "cream",
+      "layout": { "aspect": "mini", "turn": false, "w": null, "h": null, "top": null, "corner": null },
+      "elements": [
+        { "type": "date", "x": 0.878, "y": 0.92, "rot": 0, "size": 4.4, "font": "VT323", "color": "#E0662F",
+          "align": "right", "bg": "none", "source": "photo", "fmt": { "year": "short", "sep": " " } } ] },
+    { "orientation": "portrait", "color": "cream", "layout": { "aspect": "mini" }, "elements": [] } ],
+  "one": [ { "orientation": "landscape", "layout": { "aspect": "2x3" }, "elements": [] } ] }
 ```
 
-A single exported template, an array of them, or `{ "templates": [...] }` all work, both here and in the app's Import box. Push, and every visitor sees them as chips.
-
-- `look` (optional; caption-only templates leave it out and keep the current look): `format` (`two`/`one`), `layout` per format (`aspect`, and `w`/`h`/`top` as fractions of the card, `null` = default; `one` also has `orientation` and `flip`), `color` (`white`/`cream`/`blush`/`sage`/`sky`/`butter`/`ink`), `marks` (cut guide), `paperId` (e.g. `RP-108`, `4x6in`, `custom`) and `customPaper` `{ "w", "h" }` in mm.
-- `captions`: text captions with `font` (any font in the picker), `size` (mm), `edge` (`bottom`/`top`/`left`/`right`), `align` (`start`/`center`/`end`), `color` (`auto`/`ink`/`grey`/`stamp`/`navy`/`red`/`white`), `shift` (mm from centred, −15 … 15; negative = toward/over the photo), `ref` (border thickness in mm when the shift was set; anchors the caption), and `same` + `text`, or `texts` (one per photo).
-- `date`: `on`, `source` (`photo`/`now`), the same style fields, and `fmt`: `show` (`date`/`datetime`), `order` (`ymd`/`dmy`/`mdy`), `month` (`num`/`short`/`long`), `year` (`full`/`short`/`none`), `sep` (`.` `/` `-` or space), `weekday` (`none`/`short`/`long`), `clock` (`24`/`12`), `seconds` (`true`/`false`).
+- `sheet`: `format` (`two`/`one`), `paperId` (e.g. `RP-108`, `4x6in`, `custom`), `customPaper` `{ "w", "h" }` in mm, `marks` (cut guide), `linked` (prints facing the same way share a layout).
+- Each print: `orientation` (`portrait`/`landscape`), `color` (`white`/`cream`/`blush`/`sage`/`sky`/`butter`/`ink`), and `layout`:
+  - `aspect`: a shape id, or `custom` with `h` set;
+  - `turn`: turns the shape against the card;
+  - `w`, `h` and `top`: fractions of the card, where `null` means the default;
+  - `corner`: the photo corner radius as a fraction of the window's short side, where `null` means Instax.
+- `elements`, drawn in order. Every element has `type`, `x` and `y` (its anchor, as fractions of the card), `rot` (degrees) and `size` (mm: the text height, or the sticker height):
+  - `text`: `text`, `font` (any font in the picker), `color` (`auto` or `#rrggbb`), `align` (`left`/`center`/`right`; the anchor is on that side) and `bg` (`none`/`solid`/`soft`).
+  - `date`: the same style fields, plus `source` (`photo`/`now`) and `fmt`: `show` (`date`/`datetime`), `order` (`ymd`/`dmy`/`mdy`), `month` (`num`/`short`/`long`), `year` (`full`/`short`/`none`), `sep` (`.` `/` `-` or space), `weekday` (`none`/`short`/`long`), `clock` (`24`/`12`) and `seconds`.
+  - `emoji`: `char`.
+  - `sticker`: `sticker` (an id from `app/src/stickers.js`) and `color` (`null` keeps its own).
+  - `image`: `ratio` (width ÷ height) and `src` (a `data:image/…` URL).
+- Older caption templates (`"captions": [...]`, version 1–3) still work. Without a `look` they change only the writing and keep each print's layout.
 
 ## Develop
 
@@ -52,7 +76,7 @@ No build step, no dependencies.
 
 ```bash
 npm run dev     # serves app/ at http://localhost:5173
-npm test        # geometry + dpi-metadata unit tests (node --test)
+npm test        # geometry, model, date and dpi-metadata unit tests (node --test)
 ```
 
 ## Deploy
